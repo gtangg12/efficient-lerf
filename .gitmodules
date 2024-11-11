@@ -1,0 +1,6 @@
+[submodule "third_party/lerf"]
+	path = third_party/lerf
+	url = git@github.com:kerrj/lerf.git
+[submodule "third_party/Hierarchical-Localization"]
+	path = third_party/Hierarchical-Localization
+	url = git@github.com:cvg/Hierarchical-Localization.git

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=62.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "efficent-lerf"
+version = "0.0.1"
+description = "Accelerating Operations on 3D Feature Field"
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python",
+]
+dependencies = [
+    "matplotlib",
+    "natsort",
+    "numpy==1.26.4",
+    "omegaconf",
+    "torch==2.4.1",
+    "torchvision",
+    "torchtyping",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+
+[project.scripts]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["efficient_lerf*"]
