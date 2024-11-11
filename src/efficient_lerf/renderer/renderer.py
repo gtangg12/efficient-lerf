@@ -1,4 +1,5 @@
 import yaml
+from copy import deepcopy
 from pathlib import Path
 
 import torch
@@ -28,20 +29,24 @@ class Renderer:
         """
         """
         self.pipeline = load_pipeline(parent(load_config), device)
+        self.model = self.pipeline.model
+        self.model.render_setting = None
         self.scales = torch.linspace(
             0.0, 
-            self.pipeline.model.config.max_scale, 
-            self.pipeline.model.config.n_scales
+            2, #self.pipeline.model.config.max_scale, 
+            9, #self.pipeline.model.config.n_scales
         ).tolist()
+        
+        self.disable_model_cache()
 
     def render_setting(self, camera: Cameras, setting=None) -> dict:
         """
         """
         assert camera.camera_to_worlds.shape == (3, 4), 'Only one camera is supported'
-        model = self.pipeline.model
-        model.render_setting = setting
-        outputs = model.get_outputs_for_camera(camera.to(self.pipeline.device))
-        model.render_setting = None # Clear render setting
+
+        self.model.render_setting = setting
+        outputs = self.model.get_outputs_for_camera(camera.to(self.pipeline.device))
+        self.model.render_setting = None # Clear render setting
         return outputs
 
     def render(self, camera: Cameras) -> dict:
@@ -64,6 +69,18 @@ class Renderer:
         """
         return self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale, \
                self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform
+    
+    def disable_model_cache(self):
+        """
+        """
+        self.model.use_cache = False
+        self.model.cache = {}
+
+    def enable_model_cache(self):
+        """
+        """
+        self.model.use_cache = True
+        self.model.cache = {}
 
 
 if __name__ == '__main__':

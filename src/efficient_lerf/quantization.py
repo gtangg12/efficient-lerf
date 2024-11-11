@@ -1,6 +1,6 @@
 import itertools
 import os
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import torch
 from omegaconf import OmegaConf
@@ -64,11 +64,11 @@ class FeatureMapQuantization:
         H, W = sequence.cameras[0].height, sequence.cameras[0].width
 
         accum_depths = []
-        accum_clip_embed_means = []
-        accum_clip_assignments = []
+        accum_clip_embed_means = defaultdict(list)
+        accum_clip_assignments = defaultdict(list)
         accum_dino_embed_means = []
         accum_dino_assignments = []
-        count_clip = 0
+        count_clip = Counter()
         count_dino = 0
         if self.config.visualize_dir is not None:
             pcas_clip = defaultdict(dict)
@@ -80,68 +80,92 @@ class FeatureMapQuantization:
             image = (outputs['rgb'] * 255).cpu().to(torch.uint8)
             accum_depths.append(outputs['depth'].cpu().squeeze(-1))
             
-            for j, scale in tqdm(enumerate(scales), leave=False):
+            renderer.enable_model_cache()
+
+            for j, scale in enumerate(scales):
                 embed_clip = renderer.render_scale(camera, scale).cpu()
                 embed_mean, assignment = quantize_image_superpixel(image, embed_clip)
-                accum_clip_embed_means.append(embed_mean)
-                accum_clip_assignments.append(assignment + count_clip)
-                count_clip += len(torch.unique(assignment))
+                accum_clip_embed_means[j].append(embed_mean)
+                accum_clip_assignments[j].append(assignment + count_clip[j])
+                count_clip[j] += len(torch.unique(assignment))
 
-                if self.config.visualize_dir is not None:
-                    pca = compute_pca(embed_clip.numpy())
-                    pcas_clip[i][j] = pca
-                    embed_pred = embed_mean[assignment]
-                    visualize_features(embed_clip.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}.png')
-                    visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}_quant.png')
- 
+                if i % 10 != 0 or self.config.visualize_dir is None:
+                    continue
+                pca = compute_pca(embed_clip.numpy())
+                pcas_clip[i][j] = pca
+                embed_pred = embed_mean[assignment]
+                visualize_features(embed_clip.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}.png')
+                visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}_quant.png')
+            
+            renderer.disable_model_cache()
+
             embed_dino = outputs['dino'].cpu()
             embed_mean, assignment = quantize_image_superpixel(image, embed_dino)
             accum_dino_embed_means.append(embed_mean)
             accum_dino_assignments.append(assignment + count_dino)
             count_dino += len(torch.unique(assignment))
 
-            if self.config.visualize_dir is not None:
-                pca = compute_pca(embed_dino.numpy())
-                pcas_dino[i] = pca
-                embed_pred = embed_mean[assignment]
-                visualize_features(embed_dino.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
-                visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
+            if i % 10 != 0 or self.config.visualize_dir is None:
+                continue
+            pca = compute_pca(embed_dino.numpy())
+            pcas_dino[i] = pca
+            embed_pred = embed_mean[assignment]
+            visualize_features(embed_dino.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
+            visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
 
         accum_depths = torch.stack(accum_depths)
-        accum_clip_embed_means = torch.cat(accum_clip_embed_means, dim=0)
-        accum_dino_embed_means = torch.cat(accum_dino_embed_means, dim=0)
-        accum_clip_assignments = torch.stack(accum_clip_assignments).reshape(N, M, H, W)
+        for j, scale in enumerate(scales):
+            accum_clip_embed_means[j] = torch.cat  (accum_clip_embed_means[j], dim=0)
+            accum_clip_assignments[j] = torch.stack(accum_clip_assignments[j])
+        accum_dino_embed_means = torch.cat  (accum_dino_embed_means, dim=0)
         accum_dino_assignments = torch.stack(accum_dino_assignments)
-        # print(accum_clip_embed_means.shape)
-        # print(accum_dino_embed_means.shape)
-        # print(accum_clip_assignments.shape)
-        # print(accum_dino_assignments.shape)
 
-        clip_codebook, clip_codebook_indices = setup_codebook(
-            accum_clip_embed_means, 
-            accum_clip_assignments, 
-            k=int(self.config.k_clip_ratio * len(accum_clip_embed_means))
-        )
+        # for j, scale in enumerate(scales):
+        #     print(j, accum_clip_embed_means[j].shape)
+        #     print(j, accum_clip_assignments[j].shape)
+        # print(accum_dino_embed_means.shape)
+        # print(accum_dino_assignments.shape)
+        
+        clip_codebook = []
+        clip_codebook_indices = []
+        clip_codebook_count = 0
+        for j, scale in enumerate(scales):
+            clip_codebook_scale, clip_codebook_scale_indices = setup_codebook(
+                accum_clip_embed_means[j],
+                accum_clip_assignments[j],
+                k=int(self.config.k_clip_ratio * count_clip[j])
+            )
+            clip_codebook.append(clip_codebook_scale)
+            clip_codebook_indices.append(clip_codebook_scale_indices + clip_codebook_count)
+            clip_codebook_count += len(clip_codebook_scale)
+        clip_codebook = torch.cat(clip_codebook, dim=0) # (M * N, d)
+        clip_codebook_indices = torch.stack(clip_codebook_indices, dim=1) # (N, M, H, W)
+
         dino_codebook, dino_codebook_indices = setup_codebook(
             accum_dino_embed_means, 
             accum_dino_assignments, 
-            k=int(self.config.k_dino_ratio * len(accum_dino_embed_means))
+            k=int(self.config.k_dino_ratio * count_dino)
         )
+        
         # print(clip_codebook.shape)
         # print(dino_codebook.shape)
         # print(clip_codebook_indices.shape)
         # print(dino_codebook_indices.shape)
-
+        
         if self.config.visualize_dir is not None:
             for i, j in itertools.product(range(N), range(M)):
+                if i % 10 != 0:
+                    continue
                 embed_pred = clip_codebook[clip_codebook_indices[i, j]]
                 pca = pcas_clip[i][j]
                 visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scales[j]:.3f}_quant_codebook.png')
             for i in range(N):
+                if i % 10 != 0:
+                    continue
                 embed_pred = dino_codebook[dino_codebook_indices[i]]
                 pca = pcas_dino[i]
                 visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant_codebook.png')
-        
+    
         sequence_out = sequence.clone()
         sequence_out.depths = accum_depths
         sequence_out.clip_codebook = clip_codebook
@@ -164,10 +188,10 @@ if __name__ == '__main__':
     print(len(sequence))
     print(sequence_indices)
     
-    #sequence = reader.read(slice=(0, 10, 5))
+    #sequence = reader.read(slice=(0, 10, 1))
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
-        'k_clip_ratio': 0.1, 
-        'k_dino_ratio': 0.1, 
+        'k_clip_ratio': 0.05, 
+        'k_dino_ratio': 0.05, 
         'visualize_dir': reader.data_dir / 'sequence/visualizations'
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)

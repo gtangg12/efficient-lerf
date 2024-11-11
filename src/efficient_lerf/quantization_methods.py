@@ -7,7 +7,7 @@ import fast_slic
 from efficient_lerf.data.common import TorchTensor
 
 
-def compute_superpixels(image: TorchTensor['H', 'W', 3], num_components=2048, compactness=10) -> TorchTensor['H', 'W']:
+def compute_superpixels(image: TorchTensor['H', 'W', 3], num_components=1024, compactness=10) -> TorchTensor['H', 'W']:
     """
     """
     image = image.numpy().astype(np.uint8)
@@ -48,9 +48,9 @@ def quantize_embed_kmeans(embeds: TorchTensor['N', 'dim'], k: int) -> tuple:
     """
     # Cluster embeddings using k-means
     embeds = embeds.numpy()
-    kmeans = faiss.Kmeans(d=embeds.shape[-1], k=k, niter=20, verbose=True)
+    kmeans = faiss.Kmeans(d=embeds.shape[-1], k=k, niter=5, verbose=True)
     kmeans.train(embeds)
-    
+
     # Get codebook and codebook indices for embeds
     codebook = kmeans.centroids
     codebook = torch.from_numpy(codebook)

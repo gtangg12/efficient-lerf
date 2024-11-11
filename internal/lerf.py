@@ -1,6 +1,3 @@
-'''
-Replace lerf.py in repo with the following code:
-'''
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Type
@@ -87,19 +84,28 @@ class LERFModel(NerfactoModel):
         return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs)
 
     def get_outputs(self, ray_bundle: RayBundle):
-        if self.training:
-            self.camera_optimizer.apply_to_raybundle(ray_bundle)
-        ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
-        ray_samples_list.append(ray_samples)
 
-        nerfacto_field_outputs, outputs, weights = self._get_outputs_nerfacto(ray_samples)
-        lerf_weights, best_ids = torch.topk(weights, self.config.num_lerf_samples, dim=-2, sorted=False)
+        # HACK cache ray_samples across scales
+        cache_key = tuple(ray_bundle.directions[0].tolist())
+        cache_hit = cache_key in self.cache
+        #print(cache_key, cache_hit)
 
-        def gather_fn(tens):
-            return torch.gather(tens, -2, best_ids.expand(*best_ids.shape[:-1], tens.shape[-1]))
+        if self.use_cache and cache_hit:
+            lerf_samples, lerf_weights, hashgrid_field = self.cache[cache_key]
+        else:
+            if self.training:
+                self.camera_optimizer.apply_to_raybundle(ray_bundle)
+            ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
+            ray_samples_list.append(ray_samples)
 
-        dataclass_fn = lambda dc: dc._apply_fn_to_fields(gather_fn, dataclass_fn)
-        lerf_samples: RaySamples = ray_samples._apply_fn_to_fields(gather_fn, dataclass_fn)
+            nerfacto_field_outputs, outputs, weights = self._get_outputs_nerfacto(ray_samples)
+            lerf_weights, best_ids = torch.topk(weights, self.config.num_lerf_samples, dim=-2, sorted=False)
+
+            def gather_fn(tens):
+                return torch.gather(tens, -2, best_ids.expand(*best_ids.shape[:-1], tens.shape[-1]))
+
+            dataclass_fn = lambda dc: dc._apply_fn_to_fields(gather_fn, dataclass_fn)
+            lerf_samples: RaySamples = ray_samples._apply_fn_to_fields(gather_fn, dataclass_fn)
 
         if self.training:
             with torch.no_grad():
@@ -112,12 +118,16 @@ class LERFModel(NerfactoModel):
         else:
             clip_scales = torch.ones_like(lerf_samples.spacing_starts, device=self.device)
 
-        lerf_field_outputs = self.lerf_field.get_outputs(lerf_samples, clip_scales)
+        if not self.use_cache or not cache_hit:
+            lerf_field_outputs = self.lerf_field.get_outputs(lerf_samples, clip_scales)
+            hashgrid_field = lerf_field_outputs[LERFFieldHeadNames.HASHGRID]
+
+        if self.use_cache and not cache_hit:
+            self.cache[cache_key] = (lerf_samples, lerf_weights, hashgrid_field)
 
         # HACK some LERF metaprogramming (variable set in renderer)
-        if hasattr(self, 'render_setting') and isinstance(self.render_setting, float):
+        if isinstance(self.render_setting, float):
             scale = self.render_setting
-            hashgrid_field = lerf_field_outputs[LERFFieldHeadNames.HASHGRID]
             with torch.no_grad():
                 clip_output = self.lerf_field.get_output_from_hashgrid(
                     lerf_samples, 
@@ -144,7 +154,7 @@ class LERFModel(NerfactoModel):
         )
 
         # HACK some LERF metaprogramming (variable set in renderer)
-        if hasattr(self, 'render_setting') and self.render_setting == 'base':
+        if self.render_setting == 'base':
             return outputs # skip relevancy computation
 
         if not self.training:
@@ -182,7 +192,7 @@ class LERFModel(NerfactoModel):
             outputs = self.forward(ray_bundle=ray_bundle)
 
             # HACK some LERF metaprogramming (variable set in renderer)
-            if hasattr(self, 'render_setting') and self.render_setting is not None:
+            if self.render_setting is not None:
                 for output_name, output in outputs.items():  # type: ignore
                     outputs_lists[output_name].append(output)
                 continue
@@ -199,7 +209,7 @@ class LERFModel(NerfactoModel):
                         best_relevancies[phrase_i] = m
         
         # HACK some LERF metaprogramming (variable set in renderer)
-        if not hasattr(self, 'render_setting') or self.render_setting is None:
+        if self.render_setting is None:
             # re-render the max_across outputs using the best scales across all batches
             for i in range(0, num_rays, num_rays_per_chunk):
                 start_idx = i
@@ -224,7 +234,7 @@ class LERFModel(NerfactoModel):
             outputs[output_name] = torch.cat(outputs_list).view(image_height, image_width, -1)  # type: ignore
         
         # HACK some LERF metaprogramming (variable set in renderer)
-        if not hasattr(self, 'render_setting') or self.render_setting is None:
+        if self.render_setting is None:
             for i in range(len(self.image_encoder.positives)):
                 p_i = torch.clip(outputs[f"relevancy_{i}"] - 0.5, 0, 1)
                 outputs[f"composited_{i}"] = apply_colormap(p_i / (p_i.max() + 1e-6), ColormapOptions("turbo"))

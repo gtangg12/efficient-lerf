@@ -62,11 +62,13 @@ class FrameSequenceReader:
 class LERFFrameSequenceReader(FrameSequenceReader):
     """
     """
-    def __init__(self, base_dir: Path | str, name: str):
+    def __init__(self, base_dir: Path | str, name: str, downscale=2):
         """
         """
         super().__init__(base_dir, name)
         self.data_dir = self.base_dir / name / name
+        assert downscale in [1, 2, 4, 8], 'Downscale must be 1, 2, 4, or 8'
+        self.downscale = downscale
 
     def read_sequence(self, slice: tuple, transforms: dict) -> FrameSequence:
         """
@@ -75,6 +77,9 @@ class LERFFrameSequenceReader(FrameSequenceReader):
             frames = [data[key] for data in transforms['frames']]
             frames = frames[slice[0]:slice[1]:slice[2]] if slice[1] else frames[slice[0]::slice[2]]
             return frames
+        
+        def filename_downscale(filename: str) -> str:
+            return filename.replace('images', f'images_{self.downscale}')
 
         cameras = Cameras(
             camera_to_worlds=torch.tensor(extract_frames('transform_matrix'))[:, :3, :], # nerfstudio 3x4 convention
@@ -86,10 +91,11 @@ class LERFFrameSequenceReader(FrameSequenceReader):
             height=torch.tensor(extract_frames('h')),
             camera_type=CAMERA_MODEL_TO_TYPE[transforms['camera_model']]
         )
+        cameras.rescale_output_resolution(scaling_factor=1 / self.downscale)
         image_filenames = [os.path.join(self.data_dir, filename) for filename in extract_frames('file_path')]
         return FrameSequence(
             cameras=cameras, 
-            images=torch.stack([self.load_image(filename) for filename in image_filenames])
+            images=torch.stack([self.load_image(filename_downscale(filename)) for filename in image_filenames])
         )
 
     def load_transforms(self, filename: Path | str) -> dict:

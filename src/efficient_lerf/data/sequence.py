@@ -20,10 +20,10 @@ class FrameSequence:
     images: TorchTensor['N', 'H', 'W', 3]
     depths: TorchTensor['N', 'H', 'W'] = None
 
-    clip_codebook_indices: TorchTensor['N', 'H', 'W', 'nscales'] = None
-    dino_codebook_indices: TorchTensor['N', 'H', 'W'] = None
-    clip_codebook: TorchTensor['n_clip', 'dim_clip', 'nscales'] = None
+    clip_codebook: TorchTensor['n_clip', 'dim_clip'] = None
     dino_codebook: TorchTensor['n_dino', 'dim_dino'] = None
+    clip_codebook_indices: TorchTensor['N', 'nscales', 'H', 'W'] = None
+    dino_codebook_indices: TorchTensor['N', 'H', 'W'] = None
     
     metadata: dict = field(default_factory=dict)
 

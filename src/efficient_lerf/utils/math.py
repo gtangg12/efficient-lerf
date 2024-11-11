@@ -37,3 +37,9 @@ def pad_poses(poses: TorchTensor['...', 3, 4]) -> TorchTensor['...', 4, 4]:
     output = torch.eye(4).repeat(*poses.shape[:-2], 1, 1)
     output[..., :3, :] = poses[..., :3, :]
     return output
+
+
+def transpose_list(x: list[list]):
+    """
+    """
+    return list(map(list, zip(*x)))
