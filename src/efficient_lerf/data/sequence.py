@@ -79,6 +79,7 @@ def save_sequence(path: Path | str, sequence: FrameSequence) -> None:
 class FrameSequencePointCloud:
     """
     """
+    colors: TorchTensor['N', 3]
     points: TorchTensor['N', 3]
     depths: TorchTensor['N']
     clip_codebook_indices: TorchTensor['N', 'M']
@@ -131,6 +132,7 @@ def sequence_to_point_cloud(sequence: FrameSequence) -> TorchTensor['n', 3]:
     def camera_reshape(x):
         return x.permute(2, 0, 1, 3)
     
+    colors = sequence.images.reshape(-1, 3)
     depths = sequence.depths
     bundle = sequence.cameras.generate_rays(torch.arange(len(sequence.cameras))[:, None])
     points = camera_reshape(bundle.origins) + camera_reshape(bundle.directions) * depths[..., None]
@@ -138,6 +140,7 @@ def sequence_to_point_cloud(sequence: FrameSequence) -> TorchTensor['n', 3]:
     depths = depths.flatten()
     valid = (depths != 0) & (depths < torch.quantile(depths, 0.99)) # remove background/outlier points
     return FrameSequencePointCloud(
+        colors=colors[valid],
         points=points[valid],
         depths=depths[valid],
         clip_codebook_indices=sequence.clip_codebook_indices.permute(0, 2, 3, 1).flatten(0, -2)[valid],

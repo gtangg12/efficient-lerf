@@ -92,7 +92,7 @@ def visualize_outline(cmask: NumpyTensor['h', 'w'], image: NumpyTensor['h', 'w',
     return image
 
 
-def visualize_point_cloud(points, depths=None, colors=None, size=1, depth_percentile=0.8, nsamples=10000) -> go.Figure:
+def visualize_point_cloud(points, depths=None, colors=None, size=1, depth_percentile=0.8, nsamples=None) -> go.Figure:
     """
     """
     colors = np.full(points.shape, 0.5) if colors is None else colors / 255.0
@@ -103,7 +103,7 @@ def visualize_point_cloud(points, depths=None, colors=None, size=1, depth_percen
         depths = depths[valid]
         colors = colors[valid]
     
-    if points.shape[0] > nsamples:
+    if nsamples is not None and points.shape[0] > nsamples:
         indices = np.random.choice(points.shape[0], nsamples, replace=False)
         points = points[indices]
         depths = depths[indices] if depths is not None else None
@@ -114,11 +114,7 @@ def visualize_point_cloud(points, depths=None, colors=None, size=1, depth_percen
         y=points[:, 1], 
         z=points[:, 2],
         mode='markers',
-        marker=dict(
-            size=size,
-            color=np.full((points.shape[0], 3), 0.5).reshape(-1, 3),
-            opacity=0.8
-        )
+        marker=dict(size=size, color=colors, opacity=0.8)
     )
     layout = go.Layout(
         margin=dict(l=0, r=0, b=0, t=0),
