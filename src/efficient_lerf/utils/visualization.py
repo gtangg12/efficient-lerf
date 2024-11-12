@@ -92,19 +92,31 @@ def visualize_outline(cmask: NumpyTensor['h', 'w'], image: NumpyTensor['h', 'w',
     return image
 
 
-def visualize_point_cloud(points, colors=None, size=1) -> go.Figure:
+def visualize_point_cloud(points, depths=None, colors=None, size=1, depth_percentile=0.8, nsamples=10000) -> go.Figure:
     """
     """
     colors = np.full(points.shape, 0.5) if colors is None else colors / 255.0
+    
+    if depths is not None:
+        valid = (depths != 0) & (depths < np.percentile(depths, depth_percentile * 100))
+        points = points[valid]
+        depths = depths[valid]
+        colors = colors[valid]
+    
+    if points.shape[0] > nsamples:
+        indices = np.random.choice(points.shape[0], nsamples, replace=False)
+        points = points[indices]
+        depths = depths[indices] if depths is not None else None
+        colors = colors[indices]
 
     trace = go.Scatter3d(
         x=points[:, 0], 
-        y=points[:, 2], 
-        z=points[:, 1],
+        y=points[:, 1], 
+        z=points[:, 2],
         mode='markers',
         marker=dict(
             size=size,
-            color=['rgb({},{},{})'.format(r, g, b) for r, g, b in colors * 255],
+            color=np.full((points.shape[0], 3), 0.5).reshape(-1, 3),
             opacity=0.8
         )
     )
@@ -117,32 +129,6 @@ def visualize_point_cloud(points, colors=None, size=1) -> go.Figure:
         )
     )
     fig = go.Figure(data=[trace], layout=layout)
-    return fig
-
-
-def visualize_poses(poses: NumpyTensor['n', 4, 4]) -> go.Figure:
-    """
-    """
-    origins, directions = poses[:, :3, 3], poses[:, :3, :3] @ np.array([[0, 0, -1]]).T
-
-    trace_directions = go.Cone(
-        x=origins[:, 0], 
-        y=origins[:, 2],
-        z=origins[:, 1],
-        u=directions[:, 0].ravel(), 
-        v=directions[:, 2].ravel(), 
-        w=directions[:, 1].ravel(),
-        colorscale='Viridis', sizemode='scaled', sizeref=0.1, showscale=False
-    )
-    layout = go.Layout(
-        margin=dict(l=0, r=0, b=0, t=0),
-        scene=dict(
-            xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-            yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-            zaxis=dict(showgrid=False, showticklabels=False, zeroline=False)
-        )
-    )
-    fig = go.Figure(data=[trace_directions], layout=layout)
     return fig
 
 

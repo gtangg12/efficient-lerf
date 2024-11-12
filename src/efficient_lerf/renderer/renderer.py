@@ -36,6 +36,7 @@ class Renderer:
             self.pipeline.model.config.max_scale,
             self.pipeline.model.config.n_scales
         ).tolist()
+        self.scale2index = {scale: i for i, scale in enumerate(self.scales)}
         
         self.disable_model_cache()
 

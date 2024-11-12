@@ -78,7 +78,8 @@ class FeatureMapQuantization:
         for i, camera in tqdm(enumerate(cameras), 'Rendering views'):
             outputs = renderer.render(camera)
             image = (outputs['rgb'] * 255).cpu().to(torch.uint8)
-            accum_depths.append(outputs['depth'].cpu().squeeze(-1))
+            depth = (outputs['depth']).cpu().squeeze(-1)
+            accum_depths.append(depth)
             
             renderer.enable_model_cache()
 
@@ -93,13 +94,12 @@ class FeatureMapQuantization:
                 accum_clip_assignments[j].append(assignment + count_clip[j])
                 count_clip[j] += len(torch.unique(assignment))
 
-                if i % 10 != 0 or self.config.visualize_dir is None:
-                    continue
-                pca = compute_pca(embed_clip.numpy())
-                pcas_clip[i][j] = pca
-                embed_pred = embed_mean[assignment]
-                visualize_features(embed_clip.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}.png')
-                visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}_quant.png')
+                if i % self.config.visualize_iter == 0 and self.config.visualize_dir is not None:
+                    pca = compute_pca(embed_clip.numpy())
+                    pcas_clip[i][j] = pca
+                    embed_pred = embed_mean[assignment]
+                    visualize_features(embed_clip.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}.png')
+                    visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}_quant.png')
             
             renderer.disable_model_cache()
 
@@ -113,13 +113,14 @@ class FeatureMapQuantization:
             accum_dino_assignments.append(assignment + count_dino)
             count_dino += len(torch.unique(assignment))
 
-            if i % 10 != 0 or self.config.visualize_dir is None:
-                continue
-            pca = compute_pca(embed_dino.numpy())
-            pcas_dino[i] = pca
-            embed_pred = embed_mean[assignment]
-            visualize_features(embed_dino.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
-            visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
+            if i % self.config.visualize_iter == 0 and self.config.visualize_dir is not None:
+                pca = compute_pca(embed_dino.numpy())
+                pcas_dino[i] = pca
+                embed_pred = embed_mean[assignment]
+                visualize_features(embed_dino.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
+                visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
+                visualize_image(image).save(f'{self.config.visualize_dir}/image_{i:003}.png')
+                visualize_depth(depth).save(f'{self.config.visualize_dir}/depth_{i:003}.png')
 
         renderer.unload_pipeline() # Free GPU memory
         torch.cuda.empty_cache()
@@ -170,13 +171,13 @@ class FeatureMapQuantization:
         
         if self.config.visualize_dir is not None:
             for i, j in itertools.product(range(N), range(M)):
-                if i % 10 != 0:
+                if i % self.config.visualize_iter != 0:
                     continue
                 embed_pred = clip_codebook[clip_codebook_indices[i, j]]
                 pca = pcas_clip[i][j]
                 visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scales[j]:.3f}_quant_codebook.png')
             for i in range(N):
-                if i % 10 != 0:
+                if i % self.config.visualize_iter != 0:
                     continue
                 embed_pred = dino_codebook[dino_codebook_indices[i]]
                 pca = pcas_dino[i]
@@ -194,11 +195,9 @@ class FeatureMapQuantization:
 if __name__ == '__main__':
     from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
 
-    #reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
-    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'waldo_kitchen')
+    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
     sequence = reader.read(slice=(0, None, 1))
-    #renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
-    renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/waldo_kitchen/lerf/2024-11-08_040632/config.yml')
+    renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
 
     camera_traj_quant = CameraTrajQuantization(OmegaConf.create({'threshold': 0.3}))
     print(len(sequence))
@@ -214,7 +213,8 @@ if __name__ == '__main__':
         'clip_superpixels_compactness': 10,
         'dino_superpixels_num_components': 2048,
         'dino_superpixels_compactness': 10,
-        'visualize_dir': reader.data_dir / 'sequence/visualizations'
+        'visualize_dir': reader.data_dir / 'sequence/visualizations',
+        'visualize_iter': 10
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)
     print(len(sequence))

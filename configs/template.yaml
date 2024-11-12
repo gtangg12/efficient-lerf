@@ -1,0 +1,14 @@
+camera_traj_quant:
+  threshold: 0.3
+
+feature_map_quant:
+  k_clip_ratio: 0.1
+  k_dino_ratio: 0.1
+  clip_superpixels_num_components: 2048
+  clip_superpixels_compactness: 10
+  dino_superpixels_num_components: 2048
+  dino_superpixels_compactness: 10
+
+slice: [0, null, 1]
+visualize: True
+visualize_iter: 10

@@ -125,15 +125,39 @@ class FrameSequencePointCloud:
         }
 
 
+'''
 def sequence_to_point_cloud(sequence: FrameSequence) -> FrameSequencePointCloud:
     """
-    """
-    depths = sequence.depths.flatten()[:, None]
-    bundle = sequence.cameras.generate_rays(torch.arange(len(sequence.cameras)))
-    points = bundle.origins + bundle.directions * depths
-    valid = depths != 0 # remove background points
+    """    
+    depths = sequence.depths.flatten()
+    bundle = [sequence.cameras.generate_rays(i) for i in range(len(sequence))]
+    origins = torch.stack([b.origins for b in bundle]).flatten(0, -2)
+    directions = torch.stack([b.directions for b in bundle]).flatten(0, -2)
+    points = origins + directions * depths[:, None]
+    valid = (depths != 0 & (depths < torch.quantile(depths, 0.95).item())) # remove background points
     return FrameSequencePointCloud(
         points=points[valid], 
         depths=depths[valid],
-        sequence=sequence,
+        clip_codebook_indices=sequence.clip_codebook_indices.permute(0, 2, 3, 1).flatten(0, -2)[valid],
+        dino_codebook_indices=sequence.dino_codebook_indices.flatten()[valid],
+    )
+'''
+
+def sequence_to_point_cloud(sequence: FrameSequence) -> TorchTensor['n', 3]:
+    """
+    """
+    def camera_reshape(x):
+        return x.permute(2, 0, 1, 3)
+    
+    depths = sequence.depths
+    bundle = sequence.cameras.generate_rays(torch.arange(len(sequence.cameras))[:, None])
+    points = camera_reshape(bundle.origins) + camera_reshape(bundle.directions) * depths[..., None]
+    points = points.reshape(-1, 3)
+    depths = depths.flatten()
+    valid = (depths != 0) & (depths < torch.quantile(depths, 0.99)) # remove background/outlier points
+    return FrameSequencePointCloud(
+        points=points[valid],
+        depths=depths[valid],
+        clip_codebook_indices=sequence.clip_codebook_indices.permute(0, 2, 3, 1).flatten(0, -2)[valid],
+        dino_codebook_indices=sequence.dino_codebook_indices.flatten()[valid],
     )
