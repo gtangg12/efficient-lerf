@@ -28,16 +28,29 @@ class Renderer:
     def __init__(self, load_config: Path | str, device='cuda'):
         """
         """
-        self.pipeline = load_pipeline(parent(load_config), device)
-        self.model = self.pipeline.model
-        self.model.render_setting = None
+        self.load_config = load_config
+        self.device = device
+        self.load_pipeline()
         self.scales = torch.linspace(
-            0.0, 
-            2, #self.pipeline.model.config.max_scale, 
-            9, #self.pipeline.model.config.n_scales
+            0.0,
+            self.pipeline.model.config.max_scale,
+            self.pipeline.model.config.n_scales
         ).tolist()
         
         self.disable_model_cache()
+
+    def load_pipeline(self):
+        """
+        """
+        self.pipeline = load_pipeline(parent(self.load_config), self.device)
+        self.model = self.pipeline.model
+        self.model.render_setting = None
+
+    def unload_pipeline(self):
+        """
+        """
+        del self.pipeline
+        del self.model
 
     def render_setting(self, camera: Cameras, setting=None) -> dict:
         """
@@ -58,6 +71,11 @@ class Renderer:
         """
         """
         return self.render_setting(camera, setting=float(scale))['clip']
+    
+    def render_vanilla(self, camera: Cameras) -> dict:
+        """
+        """
+        return self.render_setting(camera, setting=None)
     
     def get_train_cameras(self) -> Cameras:
         """

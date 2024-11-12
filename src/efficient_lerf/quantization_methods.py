@@ -3,8 +3,10 @@ import numpy as np
 import torch
 import faiss
 import fast_slic
+from fast_pytorch_kmeans import KMeans
 
 from efficient_lerf.data.common import TorchTensor
+from efficient_lerf.utils.math import norm
 
 
 def compute_superpixels(image: TorchTensor['H', 'W', 3], num_components=1024, compactness=10) -> TorchTensor['H', 'W']:
@@ -46,17 +48,18 @@ def quantize_embed_kmeans(embeds: TorchTensor['N', 'dim'], k: int) -> tuple:
     """
     Returns: codebook: (k, d), codebook_indices: (n)
     """
-    # Cluster embeddings using k-means
+    embeds = norm(embeds, dim=-1)
     embeds = embeds.numpy()
-    kmeans = faiss.Kmeans(d=embeds.shape[-1], k=k, niter=5, verbose=True)
+    kmeans = faiss.Kmeans(d=embeds.shape[-1], k=k, spherical=True, niter=5, verbose=True)
     kmeans.train(embeds)
-
-    # Get codebook and codebook indices for embeds
+    # kmeans = KMeans(n_clusters=k, mode='cosine', verbose=1)
+    # codebook_indices = kmeans.fit_predict(embeds)
     codebook = kmeans.centroids
+
     codebook = torch.from_numpy(codebook)
     _, codebook_indices = kmeans.index.search(embeds, 1)
     codebook_indices = torch.from_numpy(codebook_indices).squeeze(1) # Remove extra dimension
-    return codebook, codebook_indices
+    return codebook.cpu(), codebook_indices.cpu()
 
 
 def quantize_embed_LBG(embeds: TorchTensor['N', 'dim']) -> tuple:
@@ -72,6 +75,8 @@ def setup_codebook(embeds: TorchTensor, assignments: TorchTensor, k: int, method
     assert method in ['kmeans', 'LBG']
     func = quantize_embed_kmeans if method == 'kmeans' else \
            quantize_embed_LBG
+    if len(embeds) == k:
+        return embeds, torch.arange(k)[assignments]
     codebook, indices = func(embeds.flatten(0, -2), k)
     return codebook, indices[assignments]
 

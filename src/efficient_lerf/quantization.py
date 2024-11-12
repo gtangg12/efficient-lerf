@@ -83,8 +83,12 @@ class FeatureMapQuantization:
             renderer.enable_model_cache()
 
             for j, scale in enumerate(scales):
-                embed_clip = renderer.render_scale(camera, scale).cpu()
-                embed_mean, assignment = quantize_image_superpixel(image, embed_clip)
+                embed_clip = norm(renderer.render_scale(camera, scale).detach().cpu(), -1)
+                embed_mean, assignment = quantize_image_superpixel(
+                    image, embed_clip, 
+                    num_components=self.config.clip_superpixels_num_components, 
+                    compactness   =self.config.clip_superpixels_compactness
+                )
                 accum_clip_embed_means[j].append(embed_mean)
                 accum_clip_assignments[j].append(assignment + count_clip[j])
                 count_clip[j] += len(torch.unique(assignment))
@@ -99,8 +103,12 @@ class FeatureMapQuantization:
             
             renderer.disable_model_cache()
 
-            embed_dino = outputs['dino'].cpu()
-            embed_mean, assignment = quantize_image_superpixel(image, embed_dino)
+            embed_dino = norm(outputs['dino'].detach().cpu(), -1)
+            embed_mean, assignment = quantize_image_superpixel(
+                image, embed_dino,
+                num_components=self.config.dino_superpixels_num_components, 
+                compactness   =self.config.dino_superpixels_compactness
+            )
             accum_dino_embed_means.append(embed_mean)
             accum_dino_assignments.append(assignment + count_dino)
             count_dino += len(torch.unique(assignment))
@@ -112,6 +120,9 @@ class FeatureMapQuantization:
             embed_pred = embed_mean[assignment]
             visualize_features(embed_dino.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
             visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
+
+        renderer.unload_pipeline() # Free GPU memory
+        torch.cuda.empty_cache()
 
         accum_depths = torch.stack(accum_depths)
         for j, scale in enumerate(scales):
@@ -125,11 +136,11 @@ class FeatureMapQuantization:
         #     print(j, accum_clip_assignments[j].shape)
         # print(accum_dino_embed_means.shape)
         # print(accum_dino_assignments.shape)
-        
+
         clip_codebook = []
         clip_codebook_indices = []
         clip_codebook_count = 0
-        for j, scale in enumerate(scales):
+        for j, scale in tqdm(enumerate(scales)):
             clip_codebook_scale, clip_codebook_scale_indices = setup_codebook(
                 accum_clip_embed_means[j],
                 accum_clip_assignments[j],
@@ -138,6 +149,9 @@ class FeatureMapQuantization:
             clip_codebook.append(clip_codebook_scale)
             clip_codebook_indices.append(clip_codebook_scale_indices + clip_codebook_count)
             clip_codebook_count += len(clip_codebook_scale)
+            del accum_clip_embed_means[j] # Free memory
+            del accum_clip_assignments[j]
+
         clip_codebook = torch.cat(clip_codebook, dim=0) # (M * N, d)
         clip_codebook_indices = torch.stack(clip_codebook_indices, dim=1) # (N, M, H, W)
 
@@ -146,6 +160,8 @@ class FeatureMapQuantization:
             accum_dino_assignments, 
             k=int(self.config.k_dino_ratio * count_dino)
         )
+        del accum_dino_embed_means # Free memory
+        del accum_dino_assignments
         
         # print(clip_codebook.shape)
         # print(dino_codebook.shape)
@@ -178,20 +194,26 @@ class FeatureMapQuantization:
 if __name__ == '__main__':
     from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
 
-    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
+    #reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
+    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'waldo_kitchen')
     sequence = reader.read(slice=(0, None, 1))
-    renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
+    #renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
+    renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/waldo_kitchen/lerf/2024-11-08_040632/config.yml')
 
-    camera_traj_quant = CameraTrajQuantization(OmegaConf.create({'threshold': 0.4}))
+    camera_traj_quant = CameraTrajQuantization(OmegaConf.create({'threshold': 0.3}))
     print(len(sequence))
     sequence, sequence_indices = camera_traj_quant.process_sequence(sequence)
     print(len(sequence))
     print(sequence_indices)
     
-    #sequence = reader.read(slice=(0, 10, 1))
+    #sequence = reader.read(slice=(0, 10, 10))
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
-        'k_clip_ratio': 0.05, 
-        'k_dino_ratio': 0.05, 
+        'k_clip_ratio': 0.1,
+        'k_dino_ratio': 0.1,
+        'clip_superpixels_num_components': 2048,
+        'clip_superpixels_compactness': 10,
+        'dino_superpixels_num_components': 2048,
+        'dino_superpixels_compactness': 10,
         'visualize_dir': reader.data_dir / 'sequence/visualizations'
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)

@@ -62,7 +62,7 @@ class FrameSequenceReader:
 class LERFFrameSequenceReader(FrameSequenceReader):
     """
     """
-    def __init__(self, base_dir: Path | str, name: str, downscale=2):
+    def __init__(self, base_dir: Path | str, name: str, downscale=4):
         """
         """
         super().__init__(base_dir, name)
