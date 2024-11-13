@@ -40,25 +40,48 @@ class DiscreteFeatureField:
 
         save_sequence(path, sequence)
         return sequence
+    
+    def exist(self, positives: list[str], return_pc=False, threshold=0.5) -> FrameSequencePointCloud:
+        """
+        """
+        image_encoder = self.renderer.pipeline.image_encoder
+        image_encoder.set_positives(positives)
+        
+        codebook_mask = torch.zeros(self.sequence.clip_codebook.shape[0], dtype=torch.bool)
+        scores = defaultdict(lambda: 0)
 
-    def render(self, camera: Cameras, scale: float) -> dict:
+        for i in range(len(positives)):
+            positive = positives[i]
+            codebook = self.sequence.clip_codebook.to(self.renderer.device)
+            probs = image_encoder.get_relevancy(codebook, positive_id=i)
+            codebook_mask |= probs[:, 0].cpu() > threshold
+            scores[positive] = probs[:, 0].max().item() # positive prob
+
+        if return_pc:
+            return scores, self.sequence_point_cloud.subsample(codebook_mask, feature='clip')
+        return scores
+    
+    def render(self, positives: list[str], camera: Cameras, threshold=0.5, return_relevancy=False) -> dict:
         """
         """
-        outputs = self.sequence_point_cloud.render(camera)
-        clip_codebook = self.sequence.clip_codebook
-        dino_codebook = self.sequence.dino_codebook
-        clip_codebook_indices = outputs['clip_codebook_indices']
-        dino_codebook_indices = outputs['dino_codebook_indices']
-        y = outputs['coords'][:, 0]
-        x = outputs['coords'][:, 1]
-        clip_embeds = torch.zeros(camera.height, camera.width, clip_codebook[..., self.renderer.scale2index(scale)].shape[-1])
-        dino_embeds = torch.zeros(camera.height, camera.width, dino_codebook.shape[-1])
-        clip_embeds[y, x] = clip_codebook[clip_codebook_indices]
-        dino_embeds[y, x] = dino_codebook[dino_codebook_indices]
-        return {
-            'clip': clip_embeds,
-            'dino': dino_embeds,
-        }
+        _, point_cloud = self.exist(positives, return_pc=True, threshold=threshold)
+        outputs = point_cloud.render_features(camera)
+        if not return_relevancy:
+            return outputs
+        
+        assert len(positives) == 1, 'Only one positive is supported for relevancy visualization'
+
+        valid = outputs['valid_mask']
+        score = torch.zeros(camera.height, camera.width)
+        for k, features in outputs.items():
+            if k in ['valid_mask', 'dino']:
+                continue
+            features = features.flatten(0, -2).to(self.renderer.device)
+            probs = self.renderer.pipeline.image_encoder.get_relevancy(features, positive_id=0)
+            probs = probs[:, 0].cpu().reshape(camera.height, camera.width)
+            score = torch.maximum(score, probs)
+        score[~valid] = 0
+        return {'relevancy': score, **outputs}
 
 
 def load_model(scene: str, config: OmegaConf) -> DiscreteFeatureField:

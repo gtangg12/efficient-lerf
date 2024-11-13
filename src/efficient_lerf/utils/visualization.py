@@ -1,7 +1,9 @@
 import cv2
 import numpy as np
+import torch
 import plotly.graph_objects as go
 from PIL import Image
+from nerfstudio.utils.colormaps import ColormapOptions, apply_colormap
 
 from efficient_lerf.data.common import NumpyTensor
 from efficient_lerf.data.sequence import FrameSequence
@@ -46,7 +48,7 @@ def visualize_depth(depth: NumpyTensor['h', 'w'], percentile=99) -> Image.Image:
     return Image.fromarray((depth * 255).astype(np.uint8))
 
 
-def visualize_features(features: NumpyTensor['h', 'w', 'dim'], pca=None) -> Image.Image:
+def visualize_features(features: NumpyTensor['h', 'w', 'dim'], pca=None, valid=None, background=BLACK) -> Image.Image:
     """
     Given features, visualizes features' first 3 (RGB) principal components.
     """
@@ -57,15 +59,20 @@ def visualize_features(features: NumpyTensor['h', 'w', 'dim'], pca=None) -> Imag
     pca_features = pca.transform(features)
     pca_features = min_max_norm(pca_features, dim=-1)
     pca_features = pca_features.reshape(H, W, 3)
+    if valid is not None:
+        pca_features[~valid] = background
     return Image.fromarray((pca_features * 255).astype('uint8'))
 
 
-def visualize_bbox(bbox: BBox, image: NumpyTensor['h', 'w', 3], color=GREEN) -> Image.Image:
+def visualize_relevancy(score: NumpyTensor['h', 'w']) -> Image.Image:
     """
     """
-    image_bbox = image.copy()
-    cv2.rectangle(image_bbox, (bbox[1], bbox[0]), (bbox[3], bbox[2]), color, 2)
-    return Image.fromarray(image_bbox)
+    H, W = score.shape
+    probs = torch.from_numpy(np.clip(score - 0.5, 0, 1))
+    probs = probs.flatten().unsqueeze(1)
+    image = apply_colormap(probs / (probs.max() + 1e-6), ColormapOptions('turbo')).numpy()
+    image = image.reshape(H, W, 3)
+    return Image.fromarray((image * 255).astype('uint8'))
 
 
 def visualize_bboxes(bboxes: list[BBox], image: NumpyTensor['h', 'w', 3], color=GREEN) -> Image.Image:
@@ -126,28 +133,3 @@ def visualize_point_cloud(points, depths=None, colors=None, size=1, depth_percen
     )
     fig = go.Figure(data=[trace], layout=layout)
     return fig
-
-
-def visualize_sequence(sequence: FrameSequence) -> Image.Image:
-    """
-    """
-    def render(visualize_func: callable, data: NumpyTensor) -> NumpyTensor:
-        return [np.array(visualize_func(x)) for x in data]
-    
-    images = render(visualize_image, sequence.images)
-    num_cols = len(images)
-    num_rows = 1
-    tiles = images
-    if sequence.depths is not None:
-        depths = render(visualize_depth, sequence.depths)
-        num_rows += 1
-        tiles.extend(depths)
-    if sequence.embeds_clip is not None:
-        features = render(visualize_features, sequence.embeds_clip)
-        num_rows += 1
-        tiles.extend(features)
-    if sequence.embeds_dino is not None:
-        features = render(visualize_features, sequence.embeds_dino)
-        num_rows += 1
-        tiles.extend(features)
-    return visualize_tiles(tiles, num_rows, num_cols)
