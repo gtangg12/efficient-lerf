@@ -136,8 +136,8 @@ class FrameSequencePointCloud:
         depths = depths[indices]
         valid_indices = torch.nonzero(valid).squeeze(1)[indices]
 
-        clip_codebook_indices = torch.full((camera.height, camera.width, M), -1, dtype=torch.long)
-        dino_codebook_indices = torch.full((camera.height, camera.width   ), -1, dtype=torch.long)
+        clip_codebook_indices = torch.full((camera.height, camera.width, M), -1, dtype=torch.int)
+        dino_codebook_indices = torch.full((camera.height, camera.width   ), -1, dtype=torch.int)
         clip_codebook_indices[coords[:, 1], coords[:, 0]] = self.clip_codebook_indices[valid_indices]
         dino_codebook_indices[coords[:, 1], coords[:, 0]] = self.dino_codebook_indices[valid_indices]
         return {

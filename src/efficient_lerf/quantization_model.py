@@ -14,13 +14,14 @@ from efficient_lerf.quantization import *
 class DiscreteFeatureField:
     """
     """
-    def __init__(self, config: OmegaConf, sequence: FrameSequence, renderer: Renderer):
+    def __init__(self, config: OmegaConf, sequence: FrameSequence, renderer: Renderer, compute_pc=True):
         """
         """
         self.config = config
         self.renderer = renderer
         self.sequence = self.quantize(sequence, self.renderer)
-        self.sequence_point_cloud = sequence_to_point_cloud(self.sequence)
+        if compute_pc:
+            self.sequence_point_cloud = sequence_to_point_cloud(self.sequence)
         # print(self.sequence_point_cloud.points.shape)
         # print(self.sequence_point_cloud.depths.shape)
         # print(self.sequence_point_cloud.clip_codebook_indices.shape)
@@ -35,7 +36,8 @@ class DiscreteFeatureField:
 
         quant_cam_traj = CameraTrajQuantization(self.config.camera_traj_quant)
         quant_feat_map = FeatureMapQuantization(self.config.feature_map_quant)
-        sequence = quant_cam_traj.process_sequence(sequence)
+        sequence, indices = quant_cam_traj.process_sequence(sequence)
+        print(indices, len(sequence))
         sequence = quant_feat_map.process_sequence(sequence, renderer)
 
         save_sequence(path, sequence)
@@ -84,20 +86,19 @@ class DiscreteFeatureField:
         return {'relevancy': score, **outputs}
 
 
-def load_model(scene: str, config: OmegaConf) -> DiscreteFeatureField:
+def load_model(scene: str, config: OmegaConf, **kwargs) -> DiscreteFeatureField:
     """
-    """
-    def load_checkpoint():
-        return glob(f'{OUTPUTS_DIR}/{scene}/lerf/*/config.yml')[0]
-    
+    """    
     sequence_reader = LERFFrameSequenceReader(DATASET_DIR, scene)
     sequence = sequence_reader.read(slice=tuple(config.slice))
-    renderer = Renderer(load_checkpoint())
-    config.visualize_dir = sequence_reader.data_dir / 'sequence/visualizations' if config.visualize else None
-    return DiscreteFeatureField(config, sequence, renderer)
+    renderer = Renderer(load_checkpoint(scene))
+    config.feature_map_quant.visualize_dir = sequence_reader.data_dir / 'sequence/visualizations' if config.visualize else None
+    config.feature_map_quant.visualize_iter = config.visualize_iter 
+    return DiscreteFeatureField(config, sequence, renderer, **kwargs)
 
 
 if __name__ == '__main__':
-    model = load_model('bouquet', OmegaConf.load(CONFIGS_DIR / 'template.yaml'))
+    from efficient_lerf.data.common import DATASETS
 
-    from efficient_lerf.utils.visualization import *
+    for scene in DATASETS:
+        model = load_model(scene, OmegaConf.load(CONFIGS_DIR / 'template.yaml'), compute_pc=False)

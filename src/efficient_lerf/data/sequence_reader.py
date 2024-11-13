@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import torch
 from nerfstudio.cameras.cameras import Cameras, CAMERA_MODEL_TO_TYPE
+from nerfstudio.cameras.camera_utils import get_distortion_params
 
 from efficient_lerf.data.sequence import FrameSequence
 
@@ -74,6 +75,8 @@ class LERFFrameSequenceReader(FrameSequenceReader):
         """
         """
         def extract_frames(key) -> list:
+            if key in transforms:
+                return transforms[key]
             frames = [data[key] for data in transforms['frames']]
             frames = frames[slice[0]:slice[1]:slice[2]] if slice[1] else frames[slice[0]::slice[2]]
             return frames
@@ -81,6 +84,8 @@ class LERFFrameSequenceReader(FrameSequenceReader):
         def filename_downscale(filename: str) -> str:
             return filename.replace('images', f'images_{self.downscale}')
 
+        CAMERA_INTRINSICS_DISTORTION = ['k1', 'k2', 'k3', 'k4', 'p1', 'p2']
+        distortion_params = {k: transforms[k] for k in CAMERA_INTRINSICS_DISTORTION if k in transforms}
         cameras = Cameras(
             camera_to_worlds=torch.tensor(extract_frames('transform_matrix'))[:, :3, :], # nerfstudio 3x4 convention
             fx=torch.tensor(extract_frames('fl_x')),
@@ -89,7 +94,8 @@ class LERFFrameSequenceReader(FrameSequenceReader):
             cy=torch.tensor(extract_frames('cy')),
             width =torch.tensor(extract_frames('w')), 
             height=torch.tensor(extract_frames('h')),
-            camera_type=CAMERA_MODEL_TO_TYPE[transforms['camera_model']]
+            camera_type=CAMERA_MODEL_TO_TYPE[transforms['camera_model']],
+            distortion_params=get_distortion_params(**distortion_params)
         )
         cameras.rescale_output_resolution(scaling_factor=1 / self.downscale)
         image_filenames = [os.path.join(self.data_dir, filename) for filename in extract_frames('file_path')]
@@ -105,8 +111,11 @@ class LERFFrameSequenceReader(FrameSequenceReader):
     
 
 if __name__ == '__main__':
-    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'book_store')
-    sequence = reader.read(slice=(0, 10, 1))
-    print(sequence.cameras.shape)
-    print(sequence.images.shape)
-    print(sequence.metadata)
+    from efficient_lerf.data.common import DATASETS
+
+    for name in DATASETS:
+        reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', name)
+        sequence = reader.read(slice=(0, 10, 1))
+        print(sequence.cameras.shape)
+        print(sequence.images.shape)
+        print(sequence.metadata)

@@ -117,10 +117,10 @@ class FeatureMapQuantization:
                 pca = compute_pca(embed_dino.numpy())
                 pcas_dino[i] = pca
                 embed_pred = embed_mean[assignment]
-                visualize_features(embed_dino.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
-                visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
-                visualize_image(image).save(f'{self.config.visualize_dir}/image_{i:003}.png')
-                visualize_depth(depth).save(f'{self.config.visualize_dir}/depth_{i:003}.png')
+                visualize_features(embed_dino.cpu().numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
+                visualize_features(embed_pred.cpu().numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
+                visualize_image(image.cpu().numpy()).save(f'{self.config.visualize_dir}/image_{i:003}.png')
+                visualize_depth(depth.cpu().numpy()).save(f'{self.config.visualize_dir}/depth_{i:003}.png')
 
         renderer.unload_pipeline() # Free GPU memory
         torch.cuda.empty_cache()

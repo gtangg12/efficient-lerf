@@ -1,12 +1,14 @@
+import json
 from collections import defaultdict
 
 import numpy as np
 import torch
 from tqdm import tqdm
-from nerfstudio.cameras.cameras import Cameras
+from omegaconf import OmegaConf
 
-from efficient_lerf.data.common import TorchTensor
+from efficient_lerf.data.common import TorchTensor, DATASET_DIR, DATASETS, load_checkpoint
 from efficient_lerf.data.sequence import FrameSequence
+from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.utils.math import mean, norm
 from efficient_lerf.quantization_methods import compute_superpixels
@@ -43,7 +45,7 @@ def evaluate_clip_alignment(sequence: FrameSequence, renderer: Renderer, **kwarg
         labels = torch.unique(assignment)
 
         for scale in renderer.scales:
-            embed = renderer.render_scale(camera, scale)
+            embed = renderer.render_scale(camera, scale).flatten(0, -2)
             for label in labels:
                 stats[scale].append(patch_sim(embed[assignment == label]))
             stats['random'].append(patch_sim_random(embed)) # sample random pairs for baseline
@@ -64,7 +66,7 @@ def evaluate_dino_alignment(sequence: FrameSequence, renderer: Renderer, **kwarg
         assignment = compute_superpixels(image, **kwargs).flatten()
         labels = torch.unique(assignment)
 
-        embed = renderer.render(camera)['dino']
+        embed = renderer.render(camera)['dino'].flatten(0, -2)
         for label in labels:
             stats['total'].append(patch_sim(embed[assignment == label]))
             stats['random'].append(patch_sim_random(embed))
@@ -76,19 +78,24 @@ def evaluate_dino_alignment(sequence: FrameSequence, renderer: Renderer, **kwarg
 def evaluate_scene(name: str) -> dict:
     """
     """
-    pass
+    print(f'Evaluating feature superpixel alignment for scene {name}')
+    
+    reader = LERFFrameSequenceReader(DATASET_DIR, name)
+    sequence = reader.read(slice=(0, -1, 10)) # subsample for faster evaluation
+    renderer = Renderer(load_checkpoint(name))
+    stats_clip = evaluate_clip_alignment(sequence, renderer)
+    stats_dino = evaluate_dino_alignment(sequence, renderer)
+    return stats_clip, stats_dino
 
 
 if __name__ == '__main__':
-    import json
-    from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
-
-    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'book_store')
-    sequence = reader.read(slice=(0, -1, 5))
-    renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/book_store/lerf/2024-11-07_102606/config.yml')
-
-    stats = evaluate_clip_alignment(sequence, renderer)
-    print(json.dumps(stats, indent=4))
-
-    stats = evaluate_dino_alignment(sequence, renderer)
-    print(json.dumps(stats, indent=4))
+    import os
+    experiment = 'experiments/feature_superpixel_alignment'
+    os.makedirs(experiment, exist_ok=True)
+    for scene in DATASETS:
+        stats_clip, stats_dino = evaluate_scene(scene)
+        with open(f'{experiment}/{scene}.json', 'w') as f:
+            json.dump({
+                'clip': stats_clip, 
+                'dino': stats_dino}, f, indent=4
+            )
