@@ -15,7 +15,7 @@ def compute_superpixels(image: TorchTensor['H', 'W', 3], num_components=1024, co
     image = image.numpy().astype(np.uint8)
     image = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     slic = fast_slic.Slic(num_components=num_components, compactness=compactness)
-    return torch.from_numpy(slic.iterate(image)).long()
+    return torch.from_numpy(slic.iterate(image)).int()
 
 
 def quantize_image_superpixel(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], **kwargs) -> tuple:
@@ -59,7 +59,7 @@ def quantize_embed_kmeans(embeds: TorchTensor['N', 'dim'], k: int) -> tuple:
     codebook = torch.from_numpy(codebook)
     _, codebook_indices = kmeans.index.search(embeds, 1)
     codebook_indices = torch.from_numpy(codebook_indices).squeeze(1) # Remove extra dimension
-    return codebook.cpu(), codebook_indices.cpu()
+    return codebook.cpu(), codebook_indices.cpu().int()
 
 
 def quantize_embed_LBG(embeds: TorchTensor['N', 'dim']) -> tuple:

@@ -133,10 +133,10 @@ class FeatureMapQuantization:
         accum_dino_assignments = torch.stack(accum_dino_assignments)
 
         # for j, scale in enumerate(scales):
-        #     print(j, accum_clip_embed_means[j].shape)
-        #     print(j, accum_clip_assignments[j].shape)
-        # print(accum_dino_embed_means.shape)
-        # print(accum_dino_assignments.shape)
+        #     print(j, accum_clip_embed_means[j].shape, accum_clip_embed_means[j].dtype)
+        #     print(j, accum_clip_assignments[j].shape, accum_clip_assignments[j].dtype)
+        # print(accum_dino_embed_means.shape, accum_dino_embed_means.dtype)
+        # print(accum_dino_assignments.shape, accum_dino_assignments.dtype)
 
         clip_codebook = []
         clip_codebook_indices = []
@@ -164,10 +164,10 @@ class FeatureMapQuantization:
         del accum_dino_embed_means # Free memory
         del accum_dino_assignments
         
-        # print(clip_codebook.shape)
-        # print(dino_codebook.shape)
-        # print(clip_codebook_indices.shape)
-        # print(dino_codebook_indices.shape)
+        # print(clip_codebook.shape, clip_codebook.dtype)
+        # print(dino_codebook.shape, dino_codebook.dtype)
+        # print(clip_codebook_indices.shape, clip_codebook_indices.dtype)
+        # print(dino_codebook_indices.shape, dino_codebook_indices.dtype)
         
         if self.config.visualize_dir is not None:
             for i, j in itertools.product(range(N), range(M)):
@@ -205,7 +205,7 @@ if __name__ == '__main__':
     print(len(sequence))
     print(sequence_indices)
     
-    #sequence = reader.read(slice=(0, 10, 10))
+    sequence = reader.read(slice=(0, 10, 10))
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
         'k_clip_ratio': 0.1,
         'k_dino_ratio': 0.1,

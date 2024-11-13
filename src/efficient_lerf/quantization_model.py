@@ -31,8 +31,8 @@ class DiscreteFeatureField:
         """
         """
         path = sequence.metadata['data_dir'] / 'sequence'
-        if path.exists():
-            return load_sequence(path)
+        #if path.exists():
+        #    return load_sequence(path)
 
         quant_cam_traj = CameraTrajQuantization(self.config.camera_traj_quant)
         quant_feat_map = FeatureMapQuantization(self.config.feature_map_quant)

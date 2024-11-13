@@ -128,7 +128,7 @@ class FrameSequencePointCloud:
         u = camera.fx * x_proj + camera.cx
         v = camera.fy * y_proj + camera.cy
         valid = (u >= 0) & (u < camera.width) & (v >= 0) & (v < camera.height) & (depths > 0)
-        coords = torch.stack([u, v], dim=1).long()[valid]
+        coords = torch.stack([u, v], dim=1).int()[valid]
         depths = depths[valid]
 
         depths, indices = torch.sort(depths, descending=True)

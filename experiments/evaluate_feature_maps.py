@@ -1,9 +1,11 @@
+import json
 from collections import defaultdict
 
 import torch
 from tqdm import tqdm
 
-from efficient_lerf.data.common import TorchTensor
+from efficient_lerf.data.common import TorchTensor, DATASET_DIR, DATASETS, load_checkpoint
+from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
 from efficient_lerf.data.sequence import FrameSequence, load_sequence
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.utils.math import norm, mean
@@ -47,7 +49,7 @@ def evaluate_clip(sequence: FrameSequence, renderer: Renderer) -> dict:
         renderer.disable_model_cache()
     
     stats = {k: mean(v) for k, v in stats.items()}
-    stats['total'] = mean(list(stats.values()))
+    stats['scale_mean'] = mean(list(stats.values()))
     return stats
 
 
@@ -71,17 +73,24 @@ def evaluate_dino(sequence: FrameSequence, renderer: Renderer) -> dict:
 def evaluate_scene(name: str) -> dict:
     """
     """
-    pass
+    print(f'Evaluating feature maps for scene {name}')
+    
+    reader = LERFFrameSequenceReader(DATASET_DIR, name)
+    sequence = load_sequence(reader.data_dir / 'sequence')
+    renderer = Renderer(load_checkpoint(name))
+    stats_clip = evaluate_clip(sequence, renderer)
+    stats_dino = evaluate_dino(sequence, renderer)
+    return stats_clip, stats_dino
 
 
 if __name__ == '__main__':
-    from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
-
-    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
-    sequence = load_sequence(reader.data_dir / 'sequence')
-    print(len(sequence))
-
-    renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
-
-    print(evaluate_clip(sequence, renderer))
-    print(evaluate_dino(sequence, renderer))
+    import os
+    experiment = 'experiments/feature_maps'
+    os.makedirs(experiment, exist_ok=True)
+    for scene in DATASETS:
+        stats_clip, stats_dino = evaluate_scene(scene)
+        with open(f'{experiment}/{scene}.json', 'w') as f:
+            json.dump({
+                'clip': stats_clip, 
+                'dino': stats_dino}, f, indent=4
+            )
