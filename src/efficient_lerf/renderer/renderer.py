@@ -56,7 +56,7 @@ class Renderer:
     def render_setting(self, camera: Cameras, setting=None) -> dict:
         """
         """
-        assert camera.camera_to_worlds.shape == (3, 4), 'Only one camera is supported'
+        assert camera.camera_to_worlds.ndim == 2, 'Only one camera is supported'
 
         self.model.render_setting = setting
         outputs = self.model.get_outputs_for_camera(camera.to(self.pipeline.device))

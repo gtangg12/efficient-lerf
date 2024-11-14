@@ -75,7 +75,7 @@ def visualize_relevancy(score: NumpyTensor['h', 'w']) -> Image.Image:
     return Image.fromarray((image * 255).astype('uint8'))
 
 
-def visualize_bboxes(bboxes: list[BBox], image: NumpyTensor['h', 'w', 3], color=GREEN) -> Image.Image:
+def visualize_bboxes(image: NumpyTensor['h', 'w', 3], bboxes: list[BBox], color=GREEN) -> Image.Image:
     """
     """
     image_bboxes = image.copy()

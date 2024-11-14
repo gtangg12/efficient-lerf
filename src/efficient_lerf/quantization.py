@@ -24,9 +24,10 @@ class CameraTrajQuantization:
         self.config = config
         self.module = ModelNetVLAD()
 
-    def process_sequence(self, sequence: FrameSequence) -> tuple[FrameSequence, TorchTensor]:
+    def process_sequence(self, sequence: FrameSequence, threshold=None, max_step=10) -> tuple[FrameSequence, TorchTensor]:
         """
         """
+        threshold = threshold or self.config.threshold
         embeds = self.module(sequence) # NetVLAD image embeddings
 
         indices = [0]
@@ -34,7 +35,7 @@ class CameraTrajQuantization:
         for i in tqdm(range(1, len(sequence))):
             embed = embeds[i]
             score = torch.dot(embed, current_embed)
-            if score > self.config.threshold:
+            if (not i - indices[-1] > max_step) and score > threshold: # max skip 10 frames
                 continue
             current_embed = embed
             indices.append(i)
@@ -42,6 +43,9 @@ class CameraTrajQuantization:
         indices = torch.tensor(indices)
         sequence_out.cameras = sequence.cameras[indices]
         sequence_out.images  = sequence.images [indices]
+
+        print('Camera trajectory quantization:', len(sequence), '->', len(sequence_out))
+        print('Indices:', indices)
         return sequence_out, indices
 
 
@@ -189,6 +193,13 @@ class FeatureMapQuantization:
         sequence_out.dino_codebook = dino_codebook
         sequence_out.clip_codebook_indices = clip_codebook_indices
         sequence_out.dino_codebook_indices = dino_codebook_indices
+
+        print('Feature map quantization:', len(sequence))
+        print('Clip codebook:', clip_codebook.shape)
+        print('Dino codebook:', dino_codebook.shape)
+        print('Clip codebook indices:', clip_codebook_indices.shape)
+        print('Dino codebook indices:', dino_codebook_indices.shape)
+
         return sequence_out
 
 

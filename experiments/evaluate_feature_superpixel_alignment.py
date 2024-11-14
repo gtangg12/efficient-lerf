@@ -1,5 +1,6 @@
 import json
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -93,8 +94,11 @@ if __name__ == '__main__':
     experiment = 'experiments/feature_superpixel_alignment'
     os.makedirs(experiment, exist_ok=True)
     for scene in DATASETS:
+        path = Path(f'{experiment}/{scene}.json')
+        if path.exists():
+            continue
         stats_clip, stats_dino = evaluate_scene(scene)
-        with open(f'{experiment}/{scene}.json', 'w') as f:
+        with open(path, 'w') as f:
             json.dump({
                 'clip': stats_clip, 
                 'dino': stats_dino}, f, indent=4
