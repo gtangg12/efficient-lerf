@@ -24,7 +24,7 @@ class CameraTrajQuantization:
         self.config = config
         self.module = ModelNetVLAD()
 
-    def process_sequence(self, sequence: FrameSequence, threshold=None, max_step=10) -> tuple[FrameSequence, TorchTensor]:
+    def process_sequence(self, sequence: FrameSequence, threshold=None, max_step=None) -> tuple[FrameSequence, TorchTensor]:
         """
         """
         threshold = threshold or self.config.threshold
@@ -35,7 +35,7 @@ class CameraTrajQuantization:
         for i in tqdm(range(1, len(sequence))):
             embed = embeds[i]
             score = torch.dot(embed, current_embed)
-            if (not i - indices[-1] > max_step) and score > threshold: # max skip 10 frames
+            if (max_step is None or i - indices[-1] < max_step) and score > threshold: # max skip 10 frames
                 continue
             current_embed = embed
             indices.append(i)
