@@ -5,10 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 from omegaconf import OmegaConf
-from sklearn.metrics import precision_recall_curve
-from scipy.interpolate import make_interp_spline
 from tqdm import tqdm
 
 from efficient_lerf.data.common import DATASET_DIR, CONFIGS_DIR
@@ -60,24 +57,6 @@ def load_labels(data_dir: Path | str) -> dict:
     except FileNotFoundError:
         pass
     return labels
-
-
-def precision_recall_curve_from_scores(scores_ours: dict, scores_lerf: dict, labels: dict, filename: Path | str):
-    """
-    """
-    probs_ours = np.array([scores_ours[label] for label in labels])
-    probs_lerf = np.array([scores_lerf[label] for label in labels])
-    targs = np.array([labels [label] for label in labels])
-
-    precision_ours, recall_ours, _ = precision_recall_curve(targs, probs_ours)
-    precision_lerf, recall_lerf, _ = precision_recall_curve(targs, probs_lerf)
-
-    plt.plot(recall_ours, precision_ours, label='Discrete Feature Field')
-    plt.plot(recall_lerf, precision_lerf, label='LERF')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.legend()
-    plt.savefig(filename)
 
 
 def evaluate_scene(name: str) -> dict:
