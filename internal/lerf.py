@@ -41,6 +41,11 @@ class LERFModel(NerfactoModel):
     def populate_modules(self):
         super().populate_modules()
 
+        # HACK some LERF metaprogramming (variable set in renderer)
+        self.cache = {}
+        self.use_cache = False
+        self.render_setting = None
+        
         self.renderer_clip = CLIPRenderer()
         self.renderer_mean = MeanRenderer()
 

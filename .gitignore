@@ -1,6 +1,7 @@
 checkpoints/
 outputs/
 tests/lerf/
+experiments/existence/visualizations
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -45,8 +45,8 @@ def precision_recall_curve_from_scores_list(
 
         ax.plot(recall_ours, precision_ours, label='Quantized Language Field', color='orange', linewidth=4)
         ax.plot(recall_lerf, precision_lerf, label='LERF', color='purple', linewidth=4)
-        ax.fill_between(recall_ours, precision_ours, alpha=0.5, color='orange')
-        ax.fill_between(recall_lerf, precision_lerf, alpha=0.5, color='purple')
+        ax.fill_between(recall_ours, precision_ours, alpha=0.3, color='orange')
+        ax.fill_between(recall_lerf, precision_lerf, alpha=0.3, color='purple')
         ax.set_xlabel('Recall', fontsize=fontsize)
         if idx == 0:
             ax.set_ylabel('Precision', fontsize=fontsize) # Only add y-label to the first plot
@@ -79,33 +79,33 @@ def compute_accuracy(labels: dict) -> float:
 
 
 if __name__ == '__main__':
-    # Feature Superpixel Alignment
-    feature_superpixel_alignment = defaultdict(dict)
+    # # Feature Superpixel Alignment
+    # feature_superpixel_alignment = defaultdict(dict)
 
-    for scene in DATASETS:
-        with open(f'experiments/feature_superpixel_alignment/{scene}.json', 'r') as f:
-            scores = json.load(f)
-        feature_superpixel_alignment['clip'][scene] = compute_norm_sim_score(scores['clip'], k='scale_mean')
-        feature_superpixel_alignment['dino'][scene] = compute_norm_sim_score(scores['dino'], k='total')
-    feature_superpixel_alignment['clip']['mean'] = np.mean(list(feature_superpixel_alignment['clip'].values()))
-    feature_superpixel_alignment['dino']['mean'] = np.mean(list(feature_superpixel_alignment['dino'].values()))
+    # for scene in DATASETS:
+    #     with open(f'experiments/feature_superpixel_alignment/{scene}.json', 'r') as f:
+    #         scores = json.load(f)
+    #     feature_superpixel_alignment['clip'][scene] = compute_norm_sim_score(scores['clip'], k='scale_mean')
+    #     feature_superpixel_alignment['dino'][scene] = compute_norm_sim_score(scores['dino'], k='total')
+    # feature_superpixel_alignment['clip']['mean'] = np.mean(list(feature_superpixel_alignment['clip'].values()))
+    # feature_superpixel_alignment['dino']['mean'] = np.mean(list(feature_superpixel_alignment['dino'].values()))
 
-    with open('experiments/feature_superpixel_alignment/metrics.json', 'w') as f:
-        json.dump(feature_superpixel_alignment, f)
+    # with open('experiments/feature_superpixel_alignment/metrics.json', 'w') as f:
+    #     json.dump(feature_superpixel_alignment, f)
 
-    # Feature Map Alignment
-    feature_map = defaultdict(dict)
+    # # Feature Map Alignment
+    # feature_map = defaultdict(dict)
 
-    for scene in DATASETS:
-        with open(f'experiments/feature_maps/{scene}.json', 'r') as f:
-            scores = json.load(f)
-        feature_map['clip'][scene] = compute_norm_sim_score(scores['clip'], k='scale_mean')
-        feature_map['dino'][scene] = compute_norm_sim_score(scores['dino'], k='dino')
-    feature_map['clip']['mean'] = np.mean(list(feature_map['clip'].values()))
-    feature_map['dino']['mean'] = np.mean(list(feature_map['dino'].values()))
+    # for scene in DATASETS:
+    #     with open(f'experiments/feature_maps/{scene}.json', 'r') as f:
+    #         scores = json.load(f)
+    #     feature_map['clip'][scene] = compute_norm_sim_score(scores['clip'], k='scale_mean')
+    #     feature_map['dino'][scene] = compute_norm_sim_score(scores['dino'], k='dino')
+    # feature_map['clip']['mean'] = np.mean(list(feature_map['clip'].values()))
+    # feature_map['dino']['mean'] = np.mean(list(feature_map['dino'].values()))
 
-    with open('experiments/feature_maps/metrics.json', 'w') as f:
-        json.dump(feature_map, f)
+    # with open('experiments/feature_maps/metrics.json', 'w') as f:
+    #     json.dump(feature_map, f)
     
     # Existence
     scenes = ['bouquet', 'figurines', 'teatime', 'waldo_kitchen']
@@ -121,7 +121,7 @@ if __name__ == '__main__':
         scores_lerf_list.append(scores['lerf'])
         labels_list.append(labels)
     precision_recall_curve_from_scores_list(scores_ours_list, scores_lerf_list, labels_list, scenes,'experiments/existence/metrics.png')
-
+    exit()
     # Localization
     localization = {}
     for scene in ['bouquet', 'figurines', 'ramen', 'teatime', 'waldo_kitchen']:
