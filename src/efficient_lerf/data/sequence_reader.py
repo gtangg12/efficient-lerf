@@ -63,7 +63,7 @@ class FrameSequenceReader:
 class LERFFrameSequenceReader(FrameSequenceReader):
     """
     """
-    def __init__(self, base_dir: Path | str, name: str, downscale=4):
+    def __init__(self, base_dir: Path | str, name: str, downscale=1):
         """
         """
         super().__init__(base_dir, name)
@@ -82,7 +82,7 @@ class LERFFrameSequenceReader(FrameSequenceReader):
             return frames
         
         def filename_downscale(filename: str) -> str:
-            return filename.replace('images', f'images_{self.downscale}')
+            return filename.replace('images', f'images_{self.downscale}') if self.downscale > 1 else filename
 
         CAMERA_INTRINSICS_DISTORTION = ['k1', 'k2', 'k3', 'k4', 'p1', 'p2']
         distortion_params = {k: transforms[k] for k in CAMERA_INTRINSICS_DISTORTION if k in transforms}
