@@ -3,11 +3,10 @@ import numpy as np
 import torch
 import plotly.graph_objects as go
 from PIL import Image
-from nerfstudio.utils.colormaps import ColormapOptions, apply_colormap
+from nerfstudio.utils.colormaps import ColormapOptions, apply_colormap, apply_pca_colormap
 
 from efficient_lerf.data.common import NumpyTensor
-from efficient_lerf.data.sequence import FrameSequence
-from efficient_lerf.utils.math import compute_pca, min_max_norm
+from efficient_lerf.utils.math import compute_pca
 
 
 BBox = tuple[int, int, int, int] # TLBR format
@@ -52,16 +51,13 @@ def visualize_features(features: NumpyTensor['h', 'w', 'dim'], pca=None, valid=N
     """
     Given features, visualizes features' first 3 (RGB) principal components.
     """
-    H, W, dim = features.shape
-    features = features.reshape(-1, dim)
+    H, W, _ = features.shape
     if pca is None:
-        pca = compute_pca(features, n=3)
-    pca_features = pca.transform(features)
-    pca_features = min_max_norm(pca_features, dim=-1)
-    pca_features = pca_features.reshape(H, W, 3)
-    if valid is not None:
-        pca_features[~valid] = background
-    return Image.fromarray((pca_features * 255).astype('uint8'))
+        pca = compute_pca(features, n=3, use_torch=True)
+    features = torch.from_numpy(features)
+    image = apply_pca_colormap(features, pca, ignore_zeros=False).numpy()
+    image.reshape(H, W, 3)
+    return Image.fromarray((image * 255).astype('uint8'))
 
 
 def visualize_relevancy(score: NumpyTensor['h', 'w']) -> Image.Image:

@@ -22,12 +22,16 @@ def min_max_norm(tensor: NumpyTensor, dim=None):
     return (tensor - tmin) / (tmax - tmin)
 
 
-def compute_pca(features: NumpyTensor, n=3) -> PCA:
+def compute_pca(features: NumpyTensor, n=3, use_torch=False) -> PCA | TorchTensor:
     """
     """
     features = features.reshape(-1, features.shape[-1])
-    pca = PCA(n_components=n)
-    pca.fit(features)
+    if use_torch:
+        features = torch.from_numpy(features)
+        _, _, pca = torch.pca_lowrank(features, q=n)
+    else:
+        pca = PCA(n_components=n)
+        pca.fit(features)
     return pca
 
 
