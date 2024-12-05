@@ -11,7 +11,7 @@ import torch
 from nerfstudio.cameras.cameras import Cameras
 
 from efficient_lerf.data.common import TorchTensor
-from efficient_lerf.utils.math import pad_poses
+from efficient_lerf.utils.math import pad_poses, upsample_feature_map
 
 
 @dataclass
@@ -62,15 +62,20 @@ class FrameSequence:
         cameras.camera_to_worlds[:, :3, 3] *= scale
         return cameras
     
-    def feature_map(self, name: str, index: int, scale: int = None) -> TorchTensor['H', 'W', 'd']:
+    def feature_map(self, name: str, index: int, scale: int = None, upsample=True) -> TorchTensor['H', 'W', 'd']:
         """
         """
         if name == 'clip':
-            return self.clip_codebook[self.clip_codebook_indices[index][scale]]
+            features = self.clip_codebook[self.clip_codebook_indices[index][scale]]
         elif name == 'dino':
-            return self.dino_codebook[self.dino_codebook_indices[index][0]]
-        raise ValueError(f'Unknown feature map {name}')
-
+            features = self.dino_codebook[self.dino_codebook_indices[index][0]]
+        else:
+            raise ValueError(f'Unknown feature map {name}')
+        if upsample:
+            H = self.cameras[0].height
+            W = self.cameras[0].width
+            features = upsample_feature_map(features, H, W)
+        return features
 
 def load_sequence(path: Path | str) -> FrameSequence:
     """

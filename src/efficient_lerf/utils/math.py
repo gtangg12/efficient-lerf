@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from sklearn.decomposition import PCA
 
 from efficient_lerf.data.common import NumpyTensor, TorchTensor
@@ -47,3 +48,12 @@ def transpose_list(x: list[list]):
     """
     """
     return list(map(list, zip(*x)))
+
+
+def upsample_feature_map(x: TorchTensor['H', 'W', 'dim'], upH, upW):
+    """
+    """
+    x = x.permute(2, 0, 1)
+    x = F.interpolate(x[None].float(), (upH, upW), mode='nearest')[0].to(x.dtype)
+    x = x.permute(1, 2, 0)
+    return x

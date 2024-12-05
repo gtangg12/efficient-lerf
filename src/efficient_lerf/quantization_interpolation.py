@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -26,9 +28,6 @@ def upsample(sequence_to_populate: FrameSequence, sequence: FrameSequence) -> Fr
     
     upH = sequence_to_populate.cameras[0].height
     upW = sequence_to_populate.cameras[0].width
-
-    def upsample(x: TorchTensor['inH', 'inW'], upH, upW):
-        return F.interpolate(x.float(), (upH, upW), mode='nearest').to(x.dtype)
 
     sequence_to_populate.clip_codebook_indices = upsample(sequence.clip_codebook_indices, upH, upW)
     sequence_to_populate.dino_codebook_indices = upsample(sequence.dino_codebook_indices, upH, upW)
