@@ -12,7 +12,7 @@ from efficient_lerf.data.common import DATASET_DIR, CONFIGS_DIR
 from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.utils.visualization import *
-from efficient_lerf.quantization_model import DiscreteFeatureField, load_model
+from efficient_lerf.feature_field import DiscreteFeatureField, load_model
 
 
 def load_labels(data_dir: Path | str) -> dict:
@@ -34,25 +34,13 @@ def load_labels(data_dir: Path | str) -> dict:
     return labels
 
 
-def exist_sequence(model: DiscreteFeatureField, positives: list[str], device='cuda') -> dict:
+def exist_sequence(model: DiscreteFeatureField, positives: list[str]) -> dict:
     """
     """
-    sequence = model.sequence
-    renderer = model.renderer
-
-    scores = model.exist(positives) # I'm lazy but negligeable runtime
-    relevancy_maps = {}
-    for i in range(len(positives)):
-        positive = positives[i]
-        probs = renderer.pipeline.image_encoder.get_relevancy(sequence.clip_codebook.to(renderer.device), positive_id=i)
-        probs = probs[:, 0].cpu()
-        relevancy = probs[sequence.clip_codebook_indices].cpu().numpy() # (N, M, H, W)
-        relevancy = relevancy.max(1) # (N, H, W)
-        relevancy_maps[positive] = relevancy
-    return scores, relevancy_maps
+    return model.find_clip(positives)
 
 
-def exist_renderer(model: DiscreteFeatureField, positives: list[str], device='cuda') -> dict:
+def exist_renderer(model: DiscreteFeatureField, positives: list[str]) -> dict:
     """
     """
     sequence = model.sequence
@@ -143,14 +131,14 @@ if __name__ == '__main__':
     os.makedirs(experiment, exist_ok=True)
     for scene in ['bouquet', 'figurines', 'teatime', 'waldo_kitchen']: # LERF Dataset does not release table scene
         path = Path(f'{experiment}/{scene}.json')
-        #if path.exists():
-        #    continue
+        if path.exists():
+           continue
         scores_ours, relevancy_maps_ours,\
         scores_lerf, relevancy_maps_lerf, iou_t = evaluate_scene(scene, experiment)
-        # with open(path, 'w') as f:
-        #     json.dump({
-        #         'ours': scores_ours, 
-        #         'lerf': scores_lerf}, f, indent=4
-        #     )
+        with open(path, 'w') as f:
+            json.dump({
+                'ours': scores_ours, 
+                'lerf': scores_lerf}, f, indent=4
+            )
         with open(f'{experiment}/{scene}_iou.json', 'w') as f:
             json.dump(iou_t, f, indent=4)

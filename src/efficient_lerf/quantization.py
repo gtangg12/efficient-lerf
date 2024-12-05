@@ -1,52 +1,27 @@
-import itertools
 import os
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 
 import torch
-from omegaconf import OmegaConf
+import torch.nn.functional as F
 from tqdm import tqdm
+from omegaconf import OmegaConf
 
 from efficient_lerf.data.common import TorchTensor
-from efficient_lerf.data.sequence import FrameSequence, save_sequence, load_sequence
-from efficient_lerf.models.model_netvlad import ModelNetVLAD
+from efficient_lerf.data.sequence import FrameSequence
 from efficient_lerf.renderer.renderer import Renderer
-from efficient_lerf.quantization_methods import *
-from efficient_lerf.utils.math import compute_pca
 from efficient_lerf.utils.visualization import *
+from efficient_lerf.quantization_methods import *
+from efficient_lerf.quantization_interpolation import *
 
 
-class CameraTrajQuantization:
-    """
-    """
-    def __init__(self, config: OmegaConf):
-        """
-        """
-        self.config = config
-        self.module = ModelNetVLAD()
+def extract_image(outputs: dict):
+    return (outputs['rgb'] * 255).cpu().to(torch.uint8)
 
-    def process_sequence(self, sequence: FrameSequence, threshold=None, max_step=None) -> tuple[FrameSequence, TorchTensor]:
-        """
-        """
-        threshold = threshold or self.config.threshold
-        embeds = self.module(sequence) # NetVLAD image embeddings
+def name_clip(j):
+    return f'clip_{j}'
 
-        indices = [0]
-        current_embed = embeds[0]
-        for i in tqdm(range(1, len(sequence))):
-            embed = embeds[i]
-            score = torch.dot(embed, current_embed)
-            if (max_step is None or i - indices[-1] < max_step) and score > threshold: # max skip 10 frames
-                continue
-            current_embed = embed
-            indices.append(i)
-        sequence_out = sequence.clone()
-        indices = torch.tensor(indices)
-        sequence_out.cameras = sequence.cameras[indices]
-        sequence_out.images  = sequence.images [indices]
-
-        print('Camera trajectory quantization:', len(sequence), '->', len(sequence_out))
-        print('Indices:', indices)
-        return sequence_out, indices
+def name_dino():
+    return 'dino'
 
 
 class FeatureMapQuantization:
@@ -60,178 +35,179 @@ class FeatureMapQuantization:
     def process_sequence(self, sequence: FrameSequence, renderer: Renderer) -> FrameSequence:
         """
         """
+        sequence_clone = sequence.clone()
+        sequence = downsample(sequence, downsample=self.config.downsample)
+        
+        pca = defaultdict(dict)
+        clip_codebook = []
+        dino_codebook = []
+        clip_cindices = []
+        dino_cindices = []
+        for i in range(0, len(sequence), self.config.batch):
+            print(f'Quantizing feature maps {i} - {i + self.config.batch}')
+            sequence_batch = sequence[i:i + self.config.batch]
+            sequence_batch = self.quantize(sequence_batch, renderer, pca=pca, index=i)
+            clip_codebook.append(sequence_batch.clip_codebook)
+            dino_codebook.append(sequence_batch.dino_codebook)
+            clip_cindices.append(sequence_batch.clip_codebook_indices)
+            dino_cindices.append(sequence_batch.dino_codebook_indices)
+
+        sequence.clip_codebook = torch.cat(clip_codebook, dim=0)
+        sequence.dino_codebook = torch.cat(dino_codebook, dim=0)
+        sequence.clip_codebook_indices = torch.cat(clip_cindices, dim=0)
+        sequence.dino_codebook_indices = torch.cat(dino_cindices, dim=0)
+
+        print('Upsampling quantized feature maps')
+
+        sequence = upsample(sequence_clone, sequence)
+
+        for i in range(len(sequence)):
+            if not (self.config.visualize_dir and i % self.config.visualize_stride == 0):
+                continue
+            for j in range(len(renderer.scales)):
+                quant = sequence.feature_map('clip', i, j)
+                visualize_features(quant.numpy(), pca[i][name_clip(j)]).save(f'{self.config.visualize_dir}/{name_clip(j)}_{i:003}_quant.png')
+            quant = sequence.feature_map('dino', i)
+            visualize_features(quant.numpy(), pca[i][name_dino()]).save(f'{self.config.visualize_dir}/{name_dino()}_{i:003}_quant.png')
+        
+        print('Feature map quantization:', len(sequence))
+        print('Clip codebook:', sequence.clip_codebook.shape)
+        print('Dino codebook:', sequence.dino_codebook.shape)
+        print('Clip codebook indices:', sequence.clip_codebook_indices.shape)
+        print('Dino codebook indices:', sequence.dino_codebook_indices.shape)
+
+        return sequence
+
+    def quantize(self, sequence: FrameSequence, renderer: Renderer, pca: dict = None, index=None) -> FrameSequence:
+        """
+        """
         cameras = sequence.transform_cameras(*renderer.get_camera_transform())
-        scales  = renderer.scales
+        M = len(renderer.scales)
+        index = index if index is not None else 0
 
-        N = len(sequence)
-        M = len(scales)
-        H, W = sequence.cameras[0].height, sequence.cameras[0].width
-
-        accum_depths = []
-        accum_clip_embed_means = defaultdict(list)
-        accum_clip_assignments = defaultdict(list)
-        accum_dino_embed_means = []
-        accum_dino_assignments = []
-        count_clip = Counter()
-        count_dino = 0
+        accum_embed_means = defaultdict(list)
+        accum_assignments = defaultdict(list)
+        accum_count = Counter()
+        pca = pca if pca is not None else defaultdict(dict)
         if self.config.visualize_dir is not None:
-            pcas_clip = defaultdict(dict)
-            pcas_dino = {}
             os.makedirs(self.config.visualize_dir, exist_ok=True)
         
-        for i, camera in tqdm(enumerate(cameras), 'Rendering views'):
-            outputs = renderer.render(camera)
-            image = (outputs['rgb'] * 255).cpu().to(torch.uint8)
-            depth = (outputs['depth']).cpu().squeeze(-1)
-            accum_depths.append(depth)
-            
-            renderer.enable_model_cache()
+        def quantize_local(
+            iter: int,
+            name: str,
+            image: TorchTensor['H', 'W'],
+            embed: TorchTensor['H', 'W', 'd'], 
+        ) -> TorchTensor['H', 'W', 'd']:
+            """
+            Returns quant: (H, W, d)
+            """
+            embed = norm(embed.detach().cpu(), -1)
+            embed_mean, assignment = quantize_image_superpixel(
+                image, 
+                embed, 
+                self.config.superpixels_ncomponents, 
+                self.config.superpixels_compactness,
+            )
+            accum_embed_means[name].append(embed_mean)
+            accum_assignments[name].append(assignment + accum_count[name])
+            accum_count[name] += len(torch.unique(assignment))
+            quant = embed_mean[assignment]
 
-            for j, scale in enumerate(scales):
-                embed_clip = norm(renderer.render_scale(camera, scale).detach().cpu(), -1)
-                embed_mean, assignment = quantize_image_superpixel(
-                    image, embed_clip, 
-                    num_components=self.config.clip_superpixels_num_components, 
-                    compactness   =self.config.clip_superpixels_compactness
+            if self.config.visualize_dir and iter % self.config.visualize_stride == 0:
+                _pca = compute_pca(embed.numpy(), use_torch=True)
+                visualize_features(embed.numpy(), _pca).save(f'{self.config.visualize_dir}/{name}_{iter:003}.png')
+                visualize_features(quant.numpy(), _pca).save(f'{self.config.visualize_dir}/{name}_{iter:003}_quant_local.png')
+                pca[iter][name] = _pca
+            return quant
+
+        def quantize_global(names: list[str], ratio: float) -> tuple:
+            """
+            Returns codebook: (k, d), codebook_indices: (N, len(names), H, W)
+            """
+            codebook = []
+            cindices = []
+            count = 0
+            for i, name in tqdm(enumerate(names)):
+                _codebook, _cindices = setup_codebook(
+                    accum_embed_means[name],
+                    accum_assignments[name],
+                    k=int(ratio * accum_count[name]) # each scale based on the same superpixels
                 )
-                accum_clip_embed_means[j].append(embed_mean)
-                accum_clip_assignments[j].append(assignment + count_clip[j])
-                count_clip[j] += len(torch.unique(assignment))
+                codebook.append(_codebook)
+                cindices.append(_cindices + count)
+                count += len(_codebook)
 
-                if i % self.config.visualize_iter == 0 and self.config.visualize_dir is not None:
-                    pca = compute_pca(embed_clip.numpy())
-                    pcas_clip[i][j] = pca
-                    embed_pred = embed_mean[assignment]
-                    visualize_features(embed_clip.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}.png')
-                    visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scale:.3f}_quant.png')
+            # Concat codebooks: M x (k_i, d) -> (k, d)
+            codebook = torch.cat(codebook, dim=0)
+            # Stack assignments: M x (N, H, W) -> (N, M, H, W)
+            cindices = torch.stack(cindices, dim=1)
+
+            for i in range(len(sequence)):
+                iter = i + index
+                if not (self.config.visualize_dir and iter % self.config.visualize_stride == 0):
+                    continue
+                for j, name in enumerate(names):
+                    quant = codebook[cindices[iter, j]]
+                    visualize_features(quant.numpy(), pca[iter][name]).save(f'{self.config.visualize_dir}/{name}_{iter:003}_quant_global.png')
+            return codebook, cindices
+        
+        print('Running per frame local quantization')
+
+        for i, camera in tqdm(enumerate(cameras)):
+            outputs = renderer.render(camera)
             
+            image = extract_image(outputs)
+            if self.config.visualize_dir and i % self.config.visualize_stride == 0:
+                visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{i:003}.png')
+
+            renderer.enable_model_cache()
+            for j, scale in enumerate(renderer.scales):
+                embed = renderer.render_scale(camera, scale)
+                quantize_local(i + index, name_clip(j), image, embed)
             renderer.disable_model_cache()
 
-            embed_dino = norm(outputs['dino'].detach().cpu(), -1)
-            embed_mean, assignment = quantize_image_superpixel(
-                image, embed_dino,
-                num_components=self.config.dino_superpixels_num_components, 
-                compactness   =self.config.dino_superpixels_compactness
-            )
-            accum_dino_embed_means.append(embed_mean)
-            accum_dino_assignments.append(assignment + count_dino)
-            count_dino += len(torch.unique(assignment))
-
-            if i % self.config.visualize_iter == 0 and self.config.visualize_dir is not None:
-                pca = compute_pca(embed_dino.numpy())
-                pcas_dino[i] = pca
-                embed_pred = embed_mean[assignment]
-                visualize_features(embed_dino.cpu().numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}.png')
-                visualize_features(embed_pred.cpu().numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant.png')
-                visualize_image(image.cpu().numpy()).save(f'{self.config.visualize_dir}/image_{i:003}.png')
-                visualize_depth(depth.cpu().numpy()).save(f'{self.config.visualize_dir}/depth_{i:003}.png')
-
-        renderer.unload_pipeline() # Free GPU memory
-        torch.cuda.empty_cache()
-
-        accum_depths = torch.stack(accum_depths)
-        for j, scale in enumerate(scales):
-            accum_clip_embed_means[j] = torch.cat  (accum_clip_embed_means[j], dim=0)
-            accum_clip_assignments[j] = torch.stack(accum_clip_assignments[j])
-        accum_dino_embed_means = torch.cat  (accum_dino_embed_means, dim=0)
-        accum_dino_assignments = torch.stack(accum_dino_assignments)
-
-        # for j, scale in enumerate(scales):
-        #     print(j, accum_clip_embed_means[j].shape, accum_clip_embed_means[j].dtype)
-        #     print(j, accum_clip_assignments[j].shape, accum_clip_assignments[j].dtype)
-        # print(accum_dino_embed_means.shape, accum_dino_embed_means.dtype)
-        # print(accum_dino_assignments.shape, accum_dino_assignments.dtype)
-
-        clip_codebook = []
-        clip_codebook_indices = []
-        clip_codebook_count = 0
-        for j, scale in tqdm(enumerate(scales)):
-            clip_codebook_scale, clip_codebook_scale_indices = setup_codebook(
-                accum_clip_embed_means[j],
-                accum_clip_assignments[j],
-                k=int(self.config.k_clip_ratio * count_clip[j])
-            )
-            clip_codebook.append(clip_codebook_scale)
-            clip_codebook_indices.append(clip_codebook_scale_indices + clip_codebook_count)
-            clip_codebook_count += len(clip_codebook_scale)
-            del accum_clip_embed_means[j] # Free memory
-            del accum_clip_assignments[j]
-
-        clip_codebook = torch.cat(clip_codebook, dim=0) # (M * N, d)
-        clip_codebook_indices = torch.stack(clip_codebook_indices, dim=1) # (N, M, H, W)
-
-        dino_codebook, dino_codebook_indices = setup_codebook(
-            accum_dino_embed_means, 
-            accum_dino_assignments, 
-            k=int(self.config.k_dino_ratio * count_dino)
-        )
-        del accum_dino_embed_means # Free memory
-        del accum_dino_assignments
+            quantize_local(i + index, name_dino(), image, outputs['dino'])
         
-        # print(clip_codebook.shape, clip_codebook.dtype)
-        # print(dino_codebook.shape, dino_codebook.dtype)
-        # print(clip_codebook_indices.shape, clip_codebook_indices.dtype)
-        # print(dino_codebook_indices.shape, dino_codebook_indices.dtype)
+        for k, v in accum_embed_means.items():
+            # Concat codebooks: (k_i, d) -> (k, d)
+            accum_embed_means[k] = torch.cat(v, dim=0)
+            # Stack assignments: (H, W) -> (N, H, W)
+            accum_assignments[k] = torch.stack(accum_assignments[k])
+
+        print('Running global quantization')
+
+        clip_codebook, clip_codebook_indices = quantize_global([name_clip(j) for j in range(M)], self.config.k_ratio)
+        dino_codebook, dino_codebook_indices = quantize_global([name_dino()                   ], self.config.k_ratio)
         
-        if self.config.visualize_dir is not None:
-            for i, j in itertools.product(range(N), range(M)):
-                if i % self.config.visualize_iter != 0:
-                    continue
-                embed_pred = clip_codebook[clip_codebook_indices[i, j]]
-                pca = pcas_clip[i][j]
-                visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/clip_{i:003}_{scales[j]:.3f}_quant_codebook.png')
-            for i in range(N):
-                if i % self.config.visualize_iter != 0:
-                    continue
-                embed_pred = dino_codebook[dino_codebook_indices[i]]
-                pca = pcas_dino[i]
-                visualize_features(embed_pred.numpy(), pca).save(f'{self.config.visualize_dir}/dino_{i:003}_quant_codebook.png')
-    
         sequence_out = sequence.clone()
-        sequence_out.depths = accum_depths
         sequence_out.clip_codebook = clip_codebook
         sequence_out.dino_codebook = dino_codebook
         sequence_out.clip_codebook_indices = clip_codebook_indices
         sequence_out.dino_codebook_indices = dino_codebook_indices
-
-        print('Feature map quantization:', len(sequence))
-        print('Clip codebook:', clip_codebook.shape)
-        print('Dino codebook:', dino_codebook.shape)
-        print('Clip codebook indices:', clip_codebook_indices.shape)
-        print('Dino codebook indices:', dino_codebook_indices.shape)
-
         return sequence_out
 
 
 if __name__ == '__main__':
     from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
+    from efficient_lerf.data.sequence import save_sequence, load_sequence
 
     reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
-    sequence = reader.read(slice=(0, None, 1))
+    sequence = reader.read(slice=(0, 4, 1))
     renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
 
-    camera_traj_quant = CameraTrajQuantization(OmegaConf.create({'threshold': 0.3}))
-    print(len(sequence))
-    sequence, sequence_indices = camera_traj_quant.process_sequence(sequence)
-    print(len(sequence))
-    print(sequence_indices)
-    
-    sequence = reader.read(slice=(0, 10, 10))
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
-        'k_clip_ratio': 0.1,
-        'k_dino_ratio': 0.1,
-        'clip_superpixels_num_components': 2048,
-        'clip_superpixels_compactness': 10,
-        'dino_superpixels_num_components': 2048,
-        'dino_superpixels_compactness': 10,
+        'batch': 2,
+        'downsample': 4,
+        'k_ratio': 0.1,
+        'superpixels_ncomponents': 2048,
+        'superpixels_compactness': 10,
         'visualize_dir': reader.data_dir / 'sequence/visualizations',
-        'visualize_iter': 10
+        'visualize_stride': 10
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)
     print(len(sequence))
 
     print(sequence.images.shape)
-    print(sequence.depths.shape)
     print(sequence.cameras.shape)
     print(sequence.clip_codebook.shape)
     print(sequence.dino_codebook.shape)
@@ -243,7 +219,6 @@ if __name__ == '__main__':
     sequence2 = load_sequence(reader.data_dir / 'sequence')
 
     assert torch.allclose(sequence.images, sequence2.images)
-    assert torch.allclose(sequence.depths, sequence2.depths)
     assert torch.allclose(sequence.cameras.camera_to_worlds, sequence2.cameras.camera_to_worlds)
     assert torch.allclose(sequence.clip_codebook, sequence2.clip_codebook)
     assert torch.allclose(sequence.dino_codebook, sequence2.dino_codebook)
