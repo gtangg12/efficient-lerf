@@ -14,9 +14,6 @@ from efficient_lerf.quantization_methods import *
 from efficient_lerf.quantization_interpolation import *
 
 
-def extract_image(outputs: dict):
-    return (outputs['rgb'] * 255).cpu().to(torch.uint8)
-
 def name_clip(j):
     return f'clip_{j}'
 
@@ -160,19 +157,20 @@ class FeatureMapQuantization:
         print('Running per frame local quantization')
 
         for i, camera in tqdm(enumerate(cameras)):
+            iter = i + index
             outputs = renderer.render(camera)
             
-            image = extract_image(outputs)
-            if self.config.visualize_dir and i % self.config.visualize_stride == 0:
-                visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{i:003}.png')
+            image = sequence.images[i]
+            if self.config.visualize_dir and iter % self.config.visualize_stride == 0:
+                visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{iter:003}.png')
 
             renderer.enable_model_cache()
             for j, scale in enumerate(renderer.scales):
                 embed = renderer.render_scale(camera, scale)
-                quantize_local(i + index, name_clip(j), image, embed)
+                quantize_local(iter, name_clip(j), image, embed)
             renderer.disable_model_cache()
 
-            quantize_local(i + index, name_dino(), image, outputs['dino'])
+            quantize_local(iter, name_dino(), image, outputs['dino'])
         
         for k, v in accum_embed_means.items():
             # Concat codebooks: (k_i, d) -> (k, d)
@@ -208,7 +206,7 @@ if __name__ == '__main__':
         'superpixels_ncomponents': 2048,
         'superpixels_compactness': 0,
         'visualize_dir': reader.data_dir / 'sequence/visualizations',
-        'visualize_stride': 1
+        'visualize_stride': 10
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)
     print(len(sequence))
