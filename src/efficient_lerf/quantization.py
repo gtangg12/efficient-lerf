@@ -42,35 +42,39 @@ class FeatureMapQuantization:
         dino_codebook = []
         clip_cindices = []
         dino_cindices = []
+        clip_count = 0
+        dino_count = 0
         for i in range(0, len(sequence), self.config.batch):
-            
+    
             print(f'Quantizing feature maps {i} - {i + self.config.batch}')
 
             batch = sequence_downsampled[i:i + self.config.batch]
             batch = self.quantize(batch, renderer, pca=pca, index=i)
             clip_codebook.append(batch.clip_codebook)
             dino_codebook.append(batch.dino_codebook)
-            clip_cindices.append(batch.clip_codebook_indices)
-            dino_cindices.append(batch.dino_codebook_indices)
+            clip_cindices.append(batch.clip_codebook_indices + clip_count)
+            dino_cindices.append(batch.dino_codebook_indices + dino_count)
+            clip_count += len(batch.clip_codebook)
+            dino_count += len(batch.dino_codebook)
 
         sequence.clip_codebook = torch.cat(clip_codebook, dim=0)
         sequence.dino_codebook = torch.cat(dino_codebook, dim=0)
         sequence.clip_codebook_indices = torch.cat(clip_cindices, dim=0)
         sequence.dino_codebook_indices = torch.cat(dino_cindices, dim=0)
 
-        print('Upsampling quantized feature maps')
+        # print('Visualizing quantized feature maps')
 
-        #sequence = upsample(sequence_clone, sequence)
+        # #sequence = upsample(sequence_clone, sequence)
 
-        for i in range(len(sequence)):
-            if not (self.config.visualize_dir and i % self.config.visualize_stride == 0):
-                continue
-            # feature maps upsampled automatically to image size
-            for j in range(len(renderer.scales)):
-                quant = sequence.feature_map('clip', i, j)
-                visualize_features(quant.numpy(), pca[i][name_clip(j)]).save(f'{self.config.visualize_dir}/{name_clip(j)}_{i:003}_quant.png')
-            quant = sequence.feature_map('dino', i)
-            visualize_features(quant.numpy(), pca[i][name_dino()]).save(f'{self.config.visualize_dir}/{name_dino()}_{i:003}_quant.png')
+        # for i in tqdm(range(len(sequence))):
+        #     if not (self.config.visualize_dir and i % self.config.visualize_stride == 0):
+        #         continue
+        #     # feature maps upsampled automatically to image size
+        #     for j in range(len(renderer.scales)):
+        #         quant = sequence.feature_map('clip', i, j)
+        #         visualize_features(quant.numpy(), pca[i][name_clip(j)]).save(f'{self.config.visualize_dir}/{name_clip(j)}_{i:003}_quant.png')
+        #     quant = sequence.feature_map('dino', i)
+        #     visualize_features(quant.numpy(), pca[i][name_dino()]).save(f'{self.config.visualize_dir}/{name_dino()}_{i:003}_quant.png')
         
         print('Feature map quantization:', len(sequence))
         print('Clip codebook:', sequence.clip_codebook.shape)
@@ -194,17 +198,17 @@ if __name__ == '__main__':
     from efficient_lerf.data.sequence import save_sequence, load_sequence
 
     reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
-    sequence = reader.read(slice=(0, 4, 1))
+    sequence = reader.read(slice=(0, None, 1))
     renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
 
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
-        'batch': 2,
+        'batch': 16,
         'downsample': 4,
         'k_ratio': 0.05,
         'superpixels_ncomponents': 2048,
-        'superpixels_compactness': 10,
+        'superpixels_compactness': 0,
         'visualize_dir': reader.data_dir / 'sequence/visualizations',
-        'visualize_stride': 10
+        'visualize_stride': 1
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)
     print(len(sequence))
