@@ -1,4 +1,5 @@
 import os
+import time
 from collections import Counter, defaultdict
 
 import torch
@@ -32,6 +33,8 @@ class FeatureMapQuantization:
     def process_sequence(self, sequence: FrameSequence, renderer: Renderer) -> FrameSequence:
         """
         """
+        start_time = time.time()
+
         sequence_downsampled = downsample(sequence, downsample=self.config.downsample)
         
         pca = defaultdict(dict)
@@ -72,7 +75,11 @@ class FeatureMapQuantization:
         #         visualize_features(quant.numpy(), pca[i][name_clip(j)]).save(f'{self.config.visualize_dir}/{name_clip(j)}_{i:003}_quant.png')
         #     quant = sequence.feature_map('dino', i)
         #     visualize_features(quant.numpy(), pca[i][name_dino()]).save(f'{self.config.visualize_dir}/{name_dino()}_{i:003}_quant.png')
-        
+
+        duration = time.time() - start_time
+        sequence.metadata['quantization_duration'] = duration
+        print(f'Feature map quantization took {duration:.2f} seconds')
+
         print('Feature map quantization:', len(sequence))
         print('Clip codebook:', sequence.clip_codebook.shape)
         print('Dino codebook:', sequence.dino_codebook.shape)
@@ -196,11 +203,11 @@ if __name__ == '__main__':
     from efficient_lerf.data.sequence import save_sequence, load_sequence
 
     reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
-    sequence = reader.read(slice=(0, None, 1))
+    sequence = reader.read(slice=(0, 4, 1))
     renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
 
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
-        'batch': 16,
+        'batch': 2,
         'downsample': 4,
         'k_ratio': 0.05,
         'superpixels_ncomponents': 2048,
