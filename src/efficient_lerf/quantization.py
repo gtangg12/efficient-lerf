@@ -190,12 +190,11 @@ class FeatureMapQuantization:
         clip_codebook, clip_codebook_indices = quantize_global([name_clip(j) for j in range(M)], self.config.k_ratio)
         dino_codebook, dino_codebook_indices = quantize_global([name_dino()                   ], self.config.k_ratio)
         
-        sequence_out = sequence.clone()
-        sequence_out.clip_codebook = clip_codebook
-        sequence_out.dino_codebook = dino_codebook
-        sequence_out.clip_codebook_indices = clip_codebook_indices
-        sequence_out.dino_codebook_indices = dino_codebook_indices
-        return sequence_out
+        sequence.clip_codebook = clip_codebook
+        sequence.dino_codebook = dino_codebook
+        sequence.clip_codebook_indices = clip_codebook_indices
+        sequence.dino_codebook_indices = dino_codebook_indices
+        return sequence
 
 
 if __name__ == '__main__':

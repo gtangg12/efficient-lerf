@@ -25,7 +25,7 @@ def quantize_embed_kmeans(embeds: TorchTensor['N', 'dim'], k: int) -> tuple:
     codebook = torch.from_numpy(codebook)
     _, codebook_indices = kmeans.index.search(embeds, 1)
     codebook_indices = torch.from_numpy(codebook_indices).squeeze(1) # Remove extra dimension
-    return codebook.cpu(), codebook_indices.cpu().long()
+    return codebook.cpu(), codebook_indices.cpu().int()
 
 
 def quantize_embed_kmeans_heirarchical(embeds: TorchTensor['N', 'dim'], k: int, levels: int) -> tuple:
@@ -72,7 +72,7 @@ def quantize_embed_kmeans_heirarchical(embeds: TorchTensor['N', 'dim'], k: int, 
     hierarchical_kmeans(indices, level=0)
     codebook = torch.from_numpy(np.array(codebook))
     codebook_indices = torch.from_numpy(codebook_indices)
-    return codebook.cpu(), codebook_indices.cpu().long()
+    return codebook.cpu(), codebook_indices.cpu().int()
 
 
 def setup_codebook(embeds: TorchTensor['N', 'dim'], assignments: TorchTensor['H', 'W'], k: int, method='kmeans') -> tuple:
@@ -106,7 +106,7 @@ def compute_superpixels(image: TorchTensor['H', 'W', 3], ncomponents=1024, compa
     image = image.numpy().astype(np.uint8)
     image = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     slic = fast_slic.Slic(num_components=ncomponents, compactness=compactness)
-    return torch.from_numpy(slic.iterate(image)).long()
+    return torch.from_numpy(slic.iterate(image)).int()
 
 
 def quantize_image_superpixel(
@@ -156,7 +156,7 @@ def quantize_image_superpixel_codebook(
 if __name__ == '__main__':
     image = torch.load('/home/gtangg12/efficient-lerf/tests/lerf/tensors/rgb.pt')
     embed = torch.load('/home/gtangg12/efficient-lerf/tests/lerf/tensors/clip.pt')
-    image = (image * 255).long()
+    image = (image * 255).int()
 
     from efficient_lerf.utils.visualization import *
 
