@@ -9,7 +9,7 @@ from efficient_lerf.data.sequence import FrameSequence
 from efficient_lerf.quantization_methods import compute_superpixels
 
 
-def downsample(sequence: FrameSequence, downsample: int) -> FrameSequence:
+def sequence_downsample(sequence: FrameSequence, downsample: int) -> FrameSequence:
     """
     """
     sequence = sequence.clone()
@@ -21,7 +21,7 @@ def downsample(sequence: FrameSequence, downsample: int) -> FrameSequence:
     return sequence
 
 
-def upsample(sequence_to_populate: FrameSequence, sequence: FrameSequence) -> FrameSequence:
+def sequence_upsample(sequence_to_populate: FrameSequence, sequence: FrameSequence) -> FrameSequence:
     """
     """
     assert len(sequence) == len(sequence_to_populate)

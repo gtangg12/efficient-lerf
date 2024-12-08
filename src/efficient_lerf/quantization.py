@@ -35,7 +35,7 @@ class FeatureMapQuantization:
         """
         start_time = time.time()
 
-        sequence_downsampled = downsample(sequence, downsample=self.config.downsample)
+        sequence_downsampled = sequence_downsample(sequence, downsample=self.config.downsample)
         
         pca = defaultdict(dict)
         clip_codebook = []
@@ -64,7 +64,7 @@ class FeatureMapQuantization:
 
         # print('Visualizing quantized feature maps')
 
-        # #sequence = upsample(sequence_clone, sequence)
+        # #sequence = sequence_upsample(sequence_clone, sequence)
 
         # for i in tqdm(range(len(sequence))):
         #     if not (self.config.visualize_dir and i % self.config.visualize_stride == 0):
@@ -172,9 +172,11 @@ class FeatureMapQuantization:
                 visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{iter:003}.png')
 
             renderer.enable_model_cache()
+
             for j, scale in enumerate(renderer.scales):
                 embed = renderer.render_scale(camera, scale)
                 quantize_local(iter, name_clip(j), image, embed)
+            
             renderer.disable_model_cache()
 
             quantize_local(iter, name_dino(), image, outputs['dino'])
