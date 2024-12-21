@@ -1,6 +1,7 @@
 import os
 import time
 from collections import Counter, defaultdict
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -38,53 +39,31 @@ class FeatureMapQuantization:
         sequence_downsampled = sequence_downsample(sequence, downsample=self.config.downsample)
         
         pca = defaultdict(dict)
-        clip_codebook = []
-        dino_codebook = []
-        clip_cindices = []
-        dino_cindices = []
-        clip_count = 0
-        dino_count = 0
+        codebook_vectors = defaultdict(list)
+        codebook_indices = defaultdict(list)
+        counts = Counter()
         for i in range(0, len(sequence), self.config.batch):
-    
             print(f'Quantizing feature maps {i} - {i + self.config.batch}')
-
+            
             batch = sequence_downsampled[i:i + self.config.batch]
             batch = self.quantize(batch, renderer, pca=pca, index=i)
-            clip_codebook.append(batch.clip_codebook)
-            dino_codebook.append(batch.dino_codebook)
-            clip_cindices.append(batch.clip_codebook_indices + clip_count)
-            dino_cindices.append(batch.dino_codebook_indices + dino_count)
-            clip_count += len(batch.clip_codebook)
-            dino_count += len(batch.dino_codebook)
+            for name in renderer.feature_names():
+                codebook_vectors[name].append(batch.codebook_vectors[name])
+                codebook_indices[name].append(batch.codebook_indices[name] + counts[name])
+                counts[name] += len(codebook_vectors[name])
 
-        sequence.clip_codebook = torch.cat(clip_codebook, dim=0)
-        sequence.dino_codebook = torch.cat(dino_codebook, dim=0)
-        sequence.clip_codebook_indices = torch.cat(clip_cindices, dim=0)
-        sequence.dino_codebook_indices = torch.cat(dino_cindices, dim=0)
-
-        # print('Visualizing quantized feature maps')
-
-        # #sequence = sequence_upsample(sequence_clone, sequence)
-
-        # for i in tqdm(range(len(sequence))):
-        #     if not (self.config.visualize_dir and i % self.config.visualize_stride == 0):
-        #         continue
-        #     # feature maps upsampled automatically to image size
-        #     for j in range(len(renderer.scales)):
-        #         quant = sequence.feature_map('clip', i, j)
-        #         visualize_features(quant.numpy(), pca[i][name_clip(j)]).save(f'{self.config.visualize_dir}/{name_clip(j)}_{i:003}_quant.png')
-        #     quant = sequence.feature_map('dino', i)
-        #     visualize_features(quant.numpy(), pca[i][name_dino()]).save(f'{self.config.visualize_dir}/{name_dino()}_{i:003}_quant.png')
+        for name in renderer.feature_names():
+            sequence.codebook_vectors[name] = torch.cat(codebook_vectors[name], dim=0)
+            sequence.codebook_indices[name] = torch.cat(codebook_indices[name], dim=0)
 
         duration = time.time() - start_time
         sequence.metadata['quantization_duration'] = duration
         print(f'Feature map quantization took {duration:.2f} seconds')
 
         print('Feature map quantization:', len(sequence))
-        print('Clip codebook:', sequence.clip_codebook.shape)
-        print('Dino codebook:', sequence.dino_codebook.shape)
-        print('Clip codebook indices:', sequence.clip_codebook_indices.shape)
-        print('Dino codebook indices:', sequence.dino_codebook_indices.shape)
+        for name in renderer.feature_names():
+            print(f'{name} codebook vectors:', sequence.codebook_vectors[name].shape)
+            print(f'{name} codebook indices:', sequence.codebook_indices[name].shape)
 
         return sequence
 
@@ -134,52 +113,45 @@ class FeatureMapQuantization:
             """
             Returns codebook: (k, d), codebook_indices: (N, len(names), H, W)
             """
-            codebook = []
-            cindices = []
+            codebook_vectors = []
+            codebook_indices = []
             count = 0
             for i, name in tqdm(enumerate(names)):
-                _codebook, _cindices = setup_codebook(
+                _codebook_vectors, _codebook_indices = setup_codebook(
                     accum_embed_means[name],
                     accum_assignments[name],
                     k=int(ratio * accum_count[name]) # each scale based on the same superpixels
                 )
-                codebook.append(_codebook)
-                cindices.append(_cindices + count)
-                count += len(_codebook)
+                codebook_vectors.append(_codebook_vectors)
+                codebook_indices.append(_codebook_indices + count)
+                count += len(_codebook_vectors)
 
             # Concat codebooks: M x (k_i, d) -> (k, d)
-            codebook = torch.cat(codebook, dim=0)
+            codebook_vectors = torch.cat(codebook_vectors, dim=0)
             # Stack assignments: M x (N, H, W) -> (N, M, H, W)
-            cindices = torch.stack(cindices, dim=1)
+            codebook_indices = torch.stack(codebook_indices, dim=1)
 
             for i in range(len(sequence)):
                 iter = i + index
                 if not (self.config.visualize_dir and iter % self.config.visualize_stride == 0):
                     continue
                 for j, name in enumerate(names):
-                    quant = codebook[cindices[i, j]]
+                    quant = codebook_vectors[codebook_indices[i, j]]
                     visualize_features(quant.numpy(), pca[iter][name]).save(f'{self.config.visualize_dir}/{name}_{iter:003}_quant_global.png')
-            return codebook, cindices
+            return codebook_vectors, codebook_indices
         
         print('Running per frame local quantization')
 
         for i, camera in tqdm(enumerate(cameras)):
             iter = i + index
-            outputs = renderer.render(camera)
-            
+
             image = sequence.images[i]
             if self.config.visualize_dir and iter % self.config.visualize_stride == 0:
                 visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{iter:003}.png')
 
-            renderer.enable_model_cache()
-
-            for j, scale in enumerate(renderer.scales):
-                embed = renderer.render_scale(camera, scale)
-                quantize_local(iter, name_clip(j), image, embed)
-            
-            renderer.disable_model_cache()
-
-            quantize_local(iter, name_dino(), image, outputs['dino'])
+            for name in renderer.feature_names():
+                for j, embed in enumerate(renderer.render_features(name, camera)):
+                    quantize_local(iter, name + f'_{j}', image, embed)
         
         for k, v in accum_embed_means.items():
             # Concat codebooks: (k_i, d) -> (k, d)
@@ -189,23 +161,22 @@ class FeatureMapQuantization:
 
         print('Running global quantization')
 
-        clip_codebook, clip_codebook_indices = quantize_global([name_clip(j) for j in range(M)], self.config.k_ratio)
-        dino_codebook, dino_codebook_indices = quantize_global([name_dino()                   ], self.config.k_ratio)
+        for name, nscales in renderer.feature_names().items():
+            codebook_vectors, codebook_indices = quantize_global([name + f'_{j}' for j in range(nscales)], self.config.k_ratio)
+            sequence.codebook_vectors[f'{name}'] = codebook_vectors
+            sequence.codebook_indices[f'{name}'] = codebook_indices
         
-        sequence.clip_codebook = clip_codebook
-        sequence.dino_codebook = dino_codebook
-        sequence.clip_codebook_indices = clip_codebook_indices
-        sequence.dino_codebook_indices = dino_codebook_indices
         return sequence
 
 
 if __name__ == '__main__':
     from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
     from efficient_lerf.data.sequence import save_sequence, load_sequence
+    from efficient_lerf.renderer.renderer_lerf import RendererLERF
 
     reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
     sequence = reader.read(slice=(0, 4, 1))
-    renderer = Renderer('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
+    renderer = RendererLERF('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
 
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
         'batch': 2,
@@ -213,7 +184,7 @@ if __name__ == '__main__':
         'k_ratio': 0.05,
         'superpixels_ncomponents': 2048,
         'superpixels_compactness': 0,
-        'visualize_dir': reader.data_dir / 'sequence/visualizations',
+        'visualize_dir': Path('tests') / 'sequence/visualizations',
         'visualize_stride': 10
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)
@@ -221,19 +192,17 @@ if __name__ == '__main__':
 
     print(sequence.images.shape)
     print(sequence.cameras.shape)
-    print(sequence.clip_codebook.shape)
-    print(sequence.dino_codebook.shape)
-    print(sequence.clip_codebook_indices.shape)
-    print(sequence.dino_codebook_indices.shape)
+    for name in renderer.feature_names():
+        print(name, 'codebook vectors', sequence.codebook_vectors[name].shape)
+        print(name, 'codebook indices', sequence.codebook_indices[name].shape)
     print(sequence.metadata)
 
-    save_sequence(reader.data_dir / 'sequence', sequence)
-    sequence2 = load_sequence(reader.data_dir / 'sequence')
+    save_sequence(Path('tests') / 'sequence/sequence.pt', sequence)
+    sequence2 = load_sequence(Path('tests') / 'sequence/sequence.pt')
 
     assert torch.allclose(sequence.images, sequence2.images)
     assert torch.allclose(sequence.cameras.camera_to_worlds, sequence2.cameras.camera_to_worlds)
-    assert torch.allclose(sequence.clip_codebook, sequence2.clip_codebook)
-    assert torch.allclose(sequence.dino_codebook, sequence2.dino_codebook)
-    assert torch.allclose(sequence.clip_codebook_indices, sequence2.clip_codebook_indices)
-    assert torch.allclose(sequence.dino_codebook_indices, sequence2.dino_codebook_indices)
+    for name in renderer.feature_names():
+        assert torch.allclose(sequence.codebook_vectors[name], sequence2.codebook_vectors[name])
+        assert torch.allclose(sequence.codebook_indices[name], sequence2.codebook_indices[name])
     print(sequence2.metadata)

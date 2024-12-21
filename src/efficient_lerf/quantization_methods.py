@@ -111,7 +111,9 @@ def compute_superpixels(image: TorchTensor['H', 'W', 3], ncomponents=1024, compa
 
 def quantize_image_superpixel(
     image: TorchTensor['H', 'W', 3], 
-    embed: TorchTensor['H', 'W', 'dim'], ncomponents=1024, compactness=10
+    embed: TorchTensor['H', 'W', 'dim'], 
+    ncomponents=1024, 
+    compactness=10
 ) -> tuple:
     """
     Returns: embed_mean: (k, d), assignemnts: (h, w)
@@ -142,15 +144,16 @@ def quantize_image_superpixel_codebook(
     image: TorchTensor['H', 'W'],
     embed: TorchTensor['H', 'W', 'd'], 
     cbook: TorchTensor['k', 'd'], 
-    ncomponents=1024, compactness=10
+    ncomponents=1024, 
+    compactness=10
 ):
     """
-    Returns: assignment_cindices: (h, w)
+    Returns: assignment_codebook_indices: (h, w)
     """
     embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents, compactness)
-    embed_mean_cindices = search_codebook(embed_mean, cbook)
-    assignment_cindices = embed_mean_cindices[assignment] # Remap superpixel indices to codebook indices
-    return assignment_cindices
+    embed_mean_codebook_indices = search_codebook(embed_mean, cbook)
+    assignment_codebook_indices = embed_mean_codebook_indices[assignment] # Remap superpixel indices to codebook indices
+    return assignment_codebook_indices
 
 
 if __name__ == '__main__':

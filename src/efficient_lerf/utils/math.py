@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
 from sklearn.decomposition import PCA
@@ -28,7 +29,8 @@ def compute_pca(features: NumpyTensor, n=3, use_torch=False) -> PCA | TorchTenso
     """
     features = features.reshape(-1, features.shape[-1])
     if use_torch:
-        features = torch.from_numpy(features)
+        if isinstance(features, np.ndarray):
+            features = torch.from_numpy(features)
         _, _, pca = torch.pca_lowrank(features, q=n)
     else:
         pca = PCA(n_components=n)

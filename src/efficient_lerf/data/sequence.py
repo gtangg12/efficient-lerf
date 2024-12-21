@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import copy
 import os
-import pickle
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
 import torch
+from PIL import Image
 from nerfstudio.cameras.cameras import Cameras
 
 from efficient_lerf.data.common import TorchTensor
@@ -22,10 +22,8 @@ class FrameSequence:
     images: TorchTensor['N', 'H', 'W', 3]
     depths: TorchTensor['N', 'H', 'W'] = None
 
-    clip_codebook: TorchTensor['n_clip', 'dim_clip'] = None
-    dino_codebook: TorchTensor['n_dino', 'dim_dino'] = None
-    clip_codebook_indices: TorchTensor['N', 'M', 'H', 'W'] = None # M is the number of scales
-    dino_codebook_indices: TorchTensor['N', 'M', 'H', 'W'] = None # M = 1
+    codebook_vectors: dict[str, TorchTensor['n', 'dim']]         = field(default_factory=dict)
+    codebook_indices: dict[str, TorchTensor['N', 'M', 'H', 'W']] = field(default_factory=dict) # M is the number of scales
     
     metadata: dict = field(default_factory=dict)
 
@@ -46,7 +44,29 @@ class FrameSequence:
                 sequence[k] = v[indices]
             else:
                 sequence[k] = v
+        sequence['codebook_vectors'] = {k: v[indices] for k, v in self.codebook_vectors.items()}
+        sequence['codebook_indices'] = {k: v[indices] for k, v in self.codebook_indices.items()}
         return FrameSequence(**sequence)
+    
+    def __repr__(self) -> str:
+        """
+        """
+        images_shape = tuple(self.images.shape) if isinstance(self.images, torch.Tensor) else None
+        depths_shape = tuple(self.depths.shape) if isinstance(self.depths, torch.Tensor) else None
+
+        codebook_vectors_shapes = {k: tuple(v.shape) for k, v in self.codebook_vectors.items()}
+        codebook_indices_shapes = {k: tuple(v.shape) for k, v in self.codebook_indices.items()}
+
+        return (
+            f"FrameSequence(\n"
+            f"  cameras={self.cameras.camera_to_worlds.shape},\n"
+            f"  images={images_shape},\n"
+            f"  depths={depths_shape},\n"
+            f"  codebook_vectors={codebook_vectors_shapes},\n"
+            f"  codebook_indices={codebook_indices_shapes},\n"
+            f"  metadata={self.metadata}\n"
+            f")"
+        )
     
     def clone(self):
         """
@@ -65,48 +85,46 @@ class FrameSequence:
     def feature_map(self, name: str, index: int, scale: int = None, upsample=True) -> TorchTensor['H', 'W', 'd']:
         """
         """
-        if name == 'clip':
-            features = self.clip_codebook[self.clip_codebook_indices[index][scale]]
-        elif name == 'dino':
-            features = self.dino_codebook[self.dino_codebook_indices[index][0]]
-        else:
-            raise ValueError(f'Unknown feature map {name}')
+        features = self.codebook_vectors[name][self.codebook_indices[name][index][scale]]
         if upsample:
             H = self.cameras[0].height
             W = self.cameras[0].width
             features = upsample_feature_map(features, H, W)
         return features
 
+
 def load_sequence(path: Path | str) -> FrameSequence:
     """
     Loads data from disk into a FrameSequence object, overwriting existing data.
     """
-    sequence = {}
-    for k, _ in FrameSequence.__dataclass_fields__.items():
-        object_filename = Path(path) / f'{k}.pt'
-        if object_filename.exists():
-            with open(object_filename, 'rb') as f:
-                sequence[k] = torch.load(f)
-            if k == 'cameras':
-                sequence[k] = Cameras(**sequence[k])
-        else:
-            sequence[k] = None
-    return FrameSequence(**sequence)
+    return torch.load(path)
 
 
 def save_sequence(path: Path | str, sequence: FrameSequence) -> None:
     """
     Saves data from a FrameSequence object to disk.
     """
-    path = Path(path)
-    os.makedirs(path, exist_ok=True)
-    for k, v in asdict(sequence).items():
-        with open(path / f'{k}.pt', 'wb') as f:
-            torch.save(v, f)
+    torch.save(sequence, path)
 
 
 def save_sequence_nerfstudio(path: Path | str, sequence: FrameSequence) -> None:
     """
-    Saves data from a FrameSequence object to disk in nerfstudio format.
+    Saves image data from a FrameSequence object to disk in nerfstudio format.
     """
-    pass
+    os.makedirs(path / 'images', exist_ok=True)
+
+    frames = []
+    for i in range(len(sequence)):
+        filename = path / f'images/image_{i}.png'
+        Image.fromarray(sequence.images[i].numpy()).save(filename)
+        frames.append({
+            'fl_x': sequence.cameras[i].fx,
+            'fl_y': sequence.cameras[i].fy,
+            'cx': sequence.cameras[i].cx,
+            'cy': sequence.cameras[i].cy,
+            'w': sequence.cameras[i].width,
+            'h': sequence.cameras[i].height,
+            'file_path': filename,
+            'transform_matrix': pad_poses(sequence.cameras[i].camera_to_worlds[i].numpy())
+        })
+    return {'camera_model': 'OPENCV', 'frames': frames}
