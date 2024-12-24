@@ -25,8 +25,14 @@ class Renderer(ABC):
         Returns camera transform and scale from input to renderer space.
         """
 
-    def render_features(self, name: str, camera: Cameras) -> iter:
+    def render(self, name: str, camera: Cameras) -> iter:
         """
         Returns an iterator over the rendered features `name` for the given `camera`.
         """
         return eval(f'self.render_{name}')(camera)
+
+    def find(self, name: str, positives: any, features: TorchTensor[..., 'dim']) -> TorchTensor['N', '...']:
+        """
+        Returns dict of scores for each positive with relevancy maps.
+        """
+        return eval(f'self.find_{name}')(positives, features)

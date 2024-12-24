@@ -150,7 +150,7 @@ class FeatureMapQuantization:
                 visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{iter:003}.png')
 
             for name in renderer.feature_names():
-                for j, embed in enumerate(renderer.render_features(name, camera)):
+                for j, embed in enumerate(renderer.render(name, camera)):
                     quantize_local(iter, name + f'_{j}', image, embed)
         
         for k, v in accum_embed_means.items():
