@@ -14,6 +14,10 @@ from nerfstudio.cameras.camera_utils import get_distortion_params
 from efficient_lerf.data.common import DATASET_DIR
 from efficient_lerf.data.sequence import FrameSequence
 
+import sys
+sys.path.append('third_party/LangSplat')
+from scene.dataset_readers import sceneLoadTypeCallbacks
+
 
 class FrameSequenceReader:
     """
@@ -25,17 +29,11 @@ class FrameSequenceReader:
         self.base_dir = Path(base_dir)
         self.data_dir = Path(base_dir) / name
 
-    def read(self, slice=(0, None, 1), transforms_filename='transforms.json') -> FrameSequence:
+    def read(self, slice=(0, None, 1)) -> FrameSequence:
         """
         Read sequence from data dir
         """
-        transforms_path = self.data_dir / transforms_filename
-        if transforms_path.exists():
-           transforms = json.load(open(transforms_path, 'r'))
-        else:
-            transforms = self.load_transforms(transforms_filename)
-            json.dump(transforms, open(transforms_path, 'w')) # save transforms to data dir
-        sequence = self.read_sequence(slice, transforms)
+        sequence = self.read_sequence(slice)
         sequence.metadata.update({'data_dir': self.data_dir})
         return sequence
 
@@ -44,13 +42,6 @@ class FrameSequenceReader:
         """
         Given nerfstudio transforms, read the sequence.
         """
-
-    @abstractmethod
-    def load_transforms(self, filename: Path | str) -> dict:
-        """
-        Generate nerfstudio transforms from data dir structure.
-        """
-        pass
     
     @classmethod
     def load_image(cls, filename: Path | str, resize: tuple[int, int]=None):
@@ -73,7 +64,7 @@ class LERFFrameSequenceReader(FrameSequenceReader):
         assert downscale in [1, 2, 4, 8], 'Downscale must be 1, 2, 4, or 8'
         self.downscale = downscale
 
-    def read_sequence(self, slice: tuple, transforms: dict) -> FrameSequence:
+    def read_sequence(self, slice: tuple) -> FrameSequence:
         """
         """
         def extract_frames(key) -> list:
@@ -85,6 +76,8 @@ class LERFFrameSequenceReader(FrameSequenceReader):
         
         def filename_downscale(filename: str) -> str:
             return filename.replace('images', f'images_{self.downscale}') if self.downscale > 1 else filename
+        
+        transforms = json.load(open(self.data_dir / 'transforms.json', 'r'))
 
         CAMERA_INTRINSICS_DISTORTION = ['k1', 'k2', 'k3', 'k4', 'p1', 'p2']
         distortion_params = {k: transforms[k] for k in CAMERA_INTRINSICS_DISTORTION if k in transforms}
@@ -105,25 +98,29 @@ class LERFFrameSequenceReader(FrameSequenceReader):
             cameras=cameras, 
             images=torch.stack([self.load_image(filename_downscale(filename)) for filename in image_filenames])
         )
-
-    def load_transforms(self, filename: Path | str) -> dict:
-        """
-        """
-        return json.load(open(self.data_dir / filename, 'r'))
     
 
 class LangSplatFrameSequenceReader(FrameSequenceReader):
     """
     """
-    pass
+    def __init__(self, name: str):
+        """
+        """
+        super().__init__(DATASET_DIR / 'lerf_ovs', name)
+
+    def read_sequence(self, slice: tuple) -> FrameSequence:
+        """
+        """
+        scene_info = sceneLoadTypeCallbacks['Colmap'](self.data_dir, images='images', eval=False)
+
+        
     
 
 if __name__ == '__main__':
-    from efficient_lerf.data.common import DATASETS
+    dataset = 'figurines'
 
-    for name in DATASETS:
-        reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF\ Datasets/', name)
-        sequence = reader.read(slice=(0, 10, 1))
-        print(sequence.cameras.shape)
-        print(sequence.images.shape)
-        print(sequence.metadata)
+    reader = LERFFrameSequenceReader(dataset)
+    sequence = reader.read(slice=(0, 10, 1))
+    print(sequence.cameras.shape)
+    print(sequence.images.shape)
+    print(sequence.metadata)
