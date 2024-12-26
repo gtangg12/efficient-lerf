@@ -159,7 +159,7 @@ class LERFModel(NerfactoModel):
         )
 
         # HACK some LERF metaprogramming (variable set in renderer)
-        if self.render_setting == 'base':
+        if self.render_setting == 'no_relevancy':
             return outputs # skip relevancy computation
 
         if not self.training:

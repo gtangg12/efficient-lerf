@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from efficient_lerf.data.common import TorchTensor
 from nerfstudio.cameras.cameras import Cameras
@@ -7,16 +8,16 @@ from nerfstudio.cameras.cameras import Cameras
 class Renderer(ABC):
     """
     """
+    def __init__(self, checkpoint: Path | str, device='cuda'):
+        """
+        """
+        self.checkpoint = Path(checkpoint)
+        self.device = device
+
     @abstractmethod
     def feature_names(self) -> dict:
         """
         Returns names of features and the respective number of scales.
-        """
-
-    @abstractmethod
-    def get_train_cameras(self) -> Cameras:
-        """
-        Returns cameras used during renderer training.
         """
 
     @abstractmethod

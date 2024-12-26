@@ -170,13 +170,16 @@ class FeatureMapQuantization:
 
 
 if __name__ == '__main__':
+    from efficient_lerf.data.common import DATASET_DIR
     from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
     from efficient_lerf.data.sequence import save_sequence, load_sequence
-    from efficient_lerf.renderer.renderer_lerf import RendererLERF
+    from efficient_lerf.renderer.renderer_lerf import LERFRenderer
 
-    reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', 'bouquet')
+    tests = Path('tests') / 'sequence'
+
+    reader = LERFFrameSequenceReader('bouquet')
     sequence = reader.read(slice=(0, 4, 1))
-    renderer = RendererLERF('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
+    renderer = LERFRenderer('bouquet')
 
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
         'batch': 2,
@@ -184,7 +187,7 @@ if __name__ == '__main__':
         'k_ratio': 0.05,
         'superpixels_ncomponents': 2048,
         'superpixels_compactness': 0,
-        'visualize_dir': Path('tests') / 'sequence/visualizations',
+        'visualize_dir': tests / 'visualizations',
         'visualize_stride': 10
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)
@@ -197,8 +200,8 @@ if __name__ == '__main__':
         print(name, 'codebook indices', sequence.codebook_indices[name].shape)
     print(sequence.metadata)
 
-    save_sequence(Path('tests') / 'sequence/sequence.pt', sequence)
-    sequence2 = load_sequence(Path('tests') / 'sequence/sequence.pt')
+    save_sequence(tests / 'sequence.pt', sequence)
+    sequence2 = load_sequence(tests / 'sequence.pt')
 
     assert torch.allclose(sequence.images, sequence2.images)
     assert torch.allclose(sequence.cameras.camera_to_worlds, sequence2.cameras.camera_to_worlds)

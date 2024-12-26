@@ -4,3 +4,9 @@
 [submodule "third_party/Hierarchical-Localization"]
 	path = third_party/Hierarchical-Localization
 	url = git@github.com:cvg/Hierarchical-Localization.git
+[submodule "third_party/LangSplat"]
+	path = third_party/LangSplat
+	url = git@github.com:minghanqin/LangSplat.git
+[submodule "third_party/gaussian-splatting"]
+	path = third_party/gaussian-splatting
+	url = https://github.com/graphdeco-inria/gaussian-splatting.git

@@ -1,14 +1,17 @@
 import os
 import json
 from abc import abstractmethod
+from glob import glob
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
+from natsort import natsorted
 from nerfstudio.cameras.cameras import Cameras, CAMERA_MODEL_TO_TYPE
 from nerfstudio.cameras.camera_utils import get_distortion_params
 
+from efficient_lerf.data.common import DATASET_DIR
 from efficient_lerf.data.sequence import FrameSequence
 
 
@@ -35,7 +38,7 @@ class FrameSequenceReader:
         sequence = self.read_sequence(slice, transforms)
         sequence.metadata.update({'data_dir': self.data_dir})
         return sequence
-    
+
     @abstractmethod
     def read_sequence(self, slice: tuple, transforms: dict) -> FrameSequence:
         """
@@ -63,11 +66,10 @@ class FrameSequenceReader:
 class LERFFrameSequenceReader(FrameSequenceReader):
     """
     """
-    def __init__(self, base_dir: Path | str, name: str, downscale=1):
+    def __init__(self, name: str, downscale=1):
         """
         """
-        super().__init__(base_dir, name)
-        self.data_dir = self.base_dir / name / name
+        super().__init__(DATASET_DIR / 'lerf/LERF Datasets', name)
         assert downscale in [1, 2, 4, 8], 'Downscale must be 1, 2, 4, or 8'
         self.downscale = downscale
 
@@ -110,11 +112,17 @@ class LERFFrameSequenceReader(FrameSequenceReader):
         return json.load(open(self.data_dir / filename, 'r'))
     
 
+class LangSplatFrameSequenceReader(FrameSequenceReader):
+    """
+    """
+    pass
+    
+
 if __name__ == '__main__':
     from efficient_lerf.data.common import DATASETS
 
     for name in DATASETS:
-        reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF Datasets/', name)
+        reader = LERFFrameSequenceReader('/home/gtangg12/data/lerf/LERF\ Datasets/', name)
         sequence = reader.read(slice=(0, 10, 1))
         print(sequence.cameras.shape)
         print(sequence.images.shape)

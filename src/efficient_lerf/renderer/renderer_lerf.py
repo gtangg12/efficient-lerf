@@ -3,39 +3,46 @@ from copy import deepcopy
 from pathlib import Path
 
 import torch
+from natsort import natsorted
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.pipelines.base_pipeline import VanillaPipeline
 from nerfstudio.utils.eval_utils import eval_load_checkpoint
 
-from efficient_lerf.data.common import TorchTensor, parent
+from efficient_lerf.data.common import TorchTensor, DATASET_DIR
 from efficient_lerf.renderer.renderer import Renderer
 
 
-def load_pipeline(outputs: Path | str, device='cuda') -> VanillaPipeline:
+def load_pipeline(checkpoint: Path, device='cuda') -> VanillaPipeline:
     """ 
     Load LERF nerfstudio pipeline from checkpoint dir `outputs`.
     """
-    with open(Path(outputs) / 'config.yml') as f:
+    with open(checkpoint / 'config.yml') as f:
         config = yaml.unsafe_load(f)
-        config.load_dir = Path(outputs) / 'nerfstudio_models'
+        config.load_dir = checkpoint / 'nerfstudio_models'
     pipeline = config.pipeline.setup(device=device)
     pipeline.eval()
     eval_load_checkpoint(config, pipeline)
     return pipeline
 
 
-class RendererLERF(Renderer):
+def latest_checkpoint(path: Path | str) -> Path:
+    path = Path(path) / 'lerf'
+    name = natsorted(path.glob('*'))[-1]
+    return path / name
+
+
+class LERFRenderer(Renderer):
     """
     """
-    def __init__(self, load_config: Path | str, device='cuda'):
+    def __init__(self, name: str, device='cuda'):
         """
         Constructs LERF pipeline and rendering scales.
         """
-        super().__init__()
-        self.device = device
-        self.pipeline = load_pipeline(parent(load_config), self.device)
+        super().__init__(latest_checkpoint(DATASET_DIR / 'lerf/outputs' / name), device)
+        self.pipeline = load_pipeline(self.checkpoint, self.device)
         self.model = self.pipeline.model
         self.model.render_setting = None
+        self.train_dataset = self.pipeline.datamanager.train_dataset
 
         self.scales = torch.linspace(
             0.0,
@@ -48,9 +55,6 @@ class RendererLERF(Renderer):
 
     def feature_names(self) -> dict:
         return {'clip': 30, 'dino': 1}
-    
-    def get_train_cameras(self) -> Cameras:
-        return self.pipeline.datamanager.train_dataset.cameras
     
     def get_camera_transform(self) -> tuple:
         return self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale, \
@@ -111,21 +115,24 @@ class RendererLERF(Renderer):
 
 
 if __name__ == '__main__':
+    import os
     from tqdm import tqdm
+    from efficient_lerf.data.common import DATASET_DIR
     from efficient_lerf.utils.visualization import *
+
+    tests = Path('/home/gtangg12/efficient-lerf/tests/lerf')
     
-    renderer = RendererLERF('/home/gtangg12/efficient-lerf/outputs/bouquet/lerf/2024-11-07_112933/config.yml')
-    cameras = renderer.get_train_cameras()
+    renderer = LERFRenderer('bouquet')
+    cameras = renderer.pipeline.datamanager.train_dataset.cameras
     cameras.rescale_output_resolution(0.25)
     cameras = cameras[0]
     print(cameras.height, cameras.width)
 
-    import os
-    os.makedirs('/home/gtangg12/efficient-lerf/tests/lerf/tensors', exist_ok=True)
+    os.makedirs(f'{tests}/lerf/tensors', exist_ok=True)
     outputs = renderer.render_lerf(cameras)
     for k, v in outputs.items():
         print(k, v.shape)
-        torch.save(v.cpu(), f'/home/gtangg12/efficient-lerf/tests/lerf/tensors/{k}.pt')
+        torch.save(v.cpu(), f'{tests}/tensors/{k}.pt')
     
     clip = renderer.render_helper(cameras, setting=1.0)['clip'] # identical to outputs['clip'] which has same scale=1
     dino = outputs['dino']
@@ -134,17 +141,17 @@ if __name__ == '__main__':
     probs = renderer.find_clip(positives, clip)
 
     for i, positive in enumerate(positives):
-        visualize_relevancy(probs[i].cpu().numpy()).save(f'/home/gtangg12/efficient-lerf/tests/lerf/relevancy_{positive}.png')
+        visualize_relevancy(probs[i].cpu().numpy()).save(f'{tests}/relevancy_{positive}.png')
 
     image = (outputs['rgb'].cpu().numpy() * 255).astype('uint8')
-    visualize_image(image).save('/home/gtangg12/efficient-lerf/tests/lerf/rgb.png')
-    visualize_depth(outputs['depth'].squeeze(2).cpu().numpy()).save('/home/gtangg12/efficient-lerf/tests/lerf/depth.png')
-    visualize_features(dino.cpu().numpy()).save('/home/gtangg12/efficient-lerf/tests/lerf/dino.png')
+    visualize_image(image).save(f'{tests}/rgb.png')
+    visualize_depth(outputs['depth'].squeeze(2).cpu().numpy()).save(f'{tests}/depth.png')
+    visualize_features(dino.cpu().numpy()).save(f'{tests}/dino.png')
 
     pca = compute_pca(clip, n=3, use_torch=True).cpu()
-    visualize_features(clip.cpu().numpy(), pca=pca).save('/home/gtangg12/efficient-lerf/tests/lerf/clip_scale.png')
-    visualize_features(outputs['clip'].cpu().numpy(), pca=pca).save('/home/gtangg12/efficient-lerf/tests/lerf/clip.png')
+    visualize_features(clip.cpu().numpy(), pca=pca).save(f'{tests}/clip_scale.png')
+    visualize_features(outputs['clip'].cpu().numpy(), pca=pca).save(f'{tests}/clip.png')
 
     for name in renderer.feature_names():
         for j, embed in tqdm(enumerate(renderer.render(name, cameras))):
-            visualize_features(embed.cpu().numpy()).save(f'/home/gtangg12/efficient-lerf/tests/lerf/{name}_{j}.png')
+            visualize_features(embed.cpu().numpy()).save(f'{tests}/{name}_{j}.png')

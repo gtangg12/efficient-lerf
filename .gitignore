@@ -1,6 +1,6 @@
 checkpoints/
 outputs/
-tests/lerf/
+tests/
 experiments/existence/visualizations
 
 # Byte-compiled / optimized / DLL files
