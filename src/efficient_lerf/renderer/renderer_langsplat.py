@@ -63,8 +63,18 @@ def load_pipeline_autoencoder(checkpoint: Path | str, device='cuda') -> callable
 
 class LangSplatRenderer(Renderer):
     """
+    LangSplat renderer class that wraps around LangSplat pipeline.
+
+    Defines the following rendering methods:
+        - render_clip: Returns iterator for clip features at different scales
+    
+    Defines the following search methods:
+        - find_clip: Returns relevancy scores for each positive language query
     """
     def __init__(self, name: str, device='cuda'):
+        """
+        Loads LangSplat Gaussian renderer and autoencoder decoder.
+        """
         super().__init__(DATASET_DIR / 'lerf_ovs' / name, device)
         self.render_fn = {
             i: load_pipeline_gaussian(self.checkpoint, i) for i in range(1, NUM_SAM_SCALES + 1)

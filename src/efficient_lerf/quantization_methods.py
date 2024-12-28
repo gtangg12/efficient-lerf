@@ -28,75 +28,18 @@ def quantize_embed_kmeans(embeds: TorchTensor['N', 'dim'], k: int) -> tuple:
     return codebook.cpu(), codebook_indices.cpu().int()
 
 
-def quantize_embed_kmeans_heirarchical(embeds: TorchTensor['N', 'dim'], k: int, levels: int) -> tuple:
-    """
-    Returns: codebook: (k, d), codebook_indices: (n)
-    """
-    embeds = norm(embeds, dim=-1)
-    embeds = embeds.numpy()
-
-    n, d = embeds.shape
-    b = int(np.floor(k ** (1 / levels)))
-
-    print(f'Heirarchical kmeans with branching factor {b}, levels {levels}')
-
-    # Initialize cluster assignments
-    codebook = []
-    codebook_indices = np.zeros(n, dtype=int)
-    clusters = 0
-
-    def hierarchical_kmeans(indices, level):
-        # Assign unique cluster id to leaf clusters
-        print(f'Level {level}, {len(indices)} samples')
-        nonlocal clusters
-        if level == levels:
-            codebook_indices[indices] = clusters
-            clusters += 1
-            return
-
-        # Perform k-means on current cluster
-        embeds_current = embeds[indices]
-        kmeans = faiss.Kmeans(d=d, k=b, spherical=True, niter=5, verbose=False, min_points_per_centroid=1) # min points to suppress warning
-        kmeans.train(embeds_current)
-        _, codebook_indices_current = kmeans.index.search(embeds_current, 1)
-        codebook_indices_current = codebook_indices_current[:, 0, ...]
-
-        # Recurse on child clusters
-        for i in range(b):
-            if level == levels - 1:
-                codebook.append(kmeans.centroids[i])
-            child_indices = indices[codebook_indices_current == i]
-            hierarchical_kmeans(child_indices, level + 1)
-
-    indices = np.arange(n)
-    hierarchical_kmeans(indices, level=0)
-    codebook = torch.from_numpy(np.array(codebook))
-    codebook_indices = torch.from_numpy(codebook_indices)
-    return codebook.cpu(), codebook_indices.cpu().int()
-
-
 def setup_codebook(embeds: TorchTensor['N', 'dim'], assignments: TorchTensor['H', 'W'], k: int, method='kmeans') -> tuple:
     """
     Returns: codebook: (k, d), codebook_indices: (N)
     """
     assert method in ['kmeans', 'kmeans_heirarchical']
-    func = quantize_embed_kmeans if method == 'kmeans' else \
-           quantize_embed_kmeans_heirarchical
+    # func = quantize_embed_kmeans if method == 'kmeans' else \
+    #        quantize_embed_kmeans_heirarchical
+    func = quantize_embed_kmeans
     if len(embeds) == k:
         return embeds, torch.arange(k)[assignments]
     codebook, indices = func(embeds.flatten(0, -2), k)
     return codebook, indices[assignments]
-
-
-def search_codebook(embeds: TorchTensor['N', 'dim'], codebook: TorchTensor['k', 'dim']) -> TorchTensor['N']:
-    """
-    Returns: indices: (N)
-    """
-    embeds = norm(embeds, dim=-1).numpy()
-    index = faiss.IndexFlatIP(codebook.shape[-1])
-    index.add(codebook.numpy())
-    _, indices = index.search(embeds, 1)
-    return torch.from_numpy(indices).squeeze(1)
 
 
 def compute_superpixels(image: TorchTensor['H', 'W', 3], ncomponents=1024, compactness=10) -> TorchTensor['H', 'W']:
@@ -109,12 +52,7 @@ def compute_superpixels(image: TorchTensor['H', 'W', 3], ncomponents=1024, compa
     return torch.from_numpy(slic.iterate(image)).int()
 
 
-def quantize_image_superpixel(
-    image: TorchTensor['H', 'W', 3], 
-    embed: TorchTensor['H', 'W', 'dim'], 
-    ncomponents=1024, 
-    compactness=10
-) -> tuple:
+def quantize_image_superpixel(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], ncomponents=1024, compactness=10) -> tuple:
     """
     Returns: embed_mean: (k, d), assignemnts: (h, w)
     """
@@ -140,20 +78,32 @@ def quantize_image_superpixel(
     return embed_mean, assignment
 
 
-def quantize_image_superpixel_codebook(
-    image: TorchTensor['H', 'W'],
-    embed: TorchTensor['H', 'W', 'd'], 
-    cbook: TorchTensor['k', 'd'], 
-    ncomponents=1024, 
-    compactness=10
-):
+def quantize_image_patch(embed: TorchTensor['H', 'W', 'dim'], patch_size=16) -> tuple:
     """
-    Returns: assignment_codebook_indices: (h, w)
+    Returns: embed_mean: (k, d), assignemnts: (h, w).
     """
-    embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents, compactness)
-    embed_mean_codebook_indices = search_codebook(embed_mean, cbook)
-    assignment_codebook_indices = embed_mean_codebook_indices[assignment] # Remap superpixel indices to codebook indices
-    return assignment_codebook_indices
+    H, W, D = embed.shape
+    
+    embed = torch.nn.functional.pad(
+        embed, (
+            0, 0,
+            0, patch_size - embed.shape[1] % patch_size, 
+            0, patch_size - embed.shape[0] % patch_size,
+        )
+    )
+    patches_h = embed.shape[0] // patch_size
+    patches_w = embed.shape[1] // patch_size
+    embed = embed.view(patches_h, patch_size, patches_w, patch_size, D)
+    
+    embed_mean = embed.mean(dim=(1, 3)).view(-1, D)
+
+    rindices = torch.arange(H, device=embed.device).unsqueeze(1).expand(-1, W)
+    cindices = torch.arange(W, device=embed.device).unsqueeze(0).expand(H, -1)
+
+    assignments = (rindices // patch_size) * patches_w + (cindices // patch_size) # (padH, padW)
+    assignments = assignments[:H, :W] # (H, W)
+
+    return embed_mean, assignments
 
 
 if __name__ == '__main__':
@@ -163,13 +113,18 @@ if __name__ == '__main__':
 
     from efficient_lerf.utils.visualization import *
 
-    embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents=2048, compactness=10)
+    embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents=1024, compactness=10)
     print(embed_mean.shape, assignment.shape)
+    print('Reconstruction error:', torch.mean(torch.abs(embed - embed_mean[assignment])).item())
 
     codebook, codebook_indices = quantize_embed_kmeans(embed_mean, k=512)
     print(codebook.shape, codebook_indices.shape)
     assert len(codebook_indices.unique()) == len(codebook)
 
-    codebook, codebook_indices = quantize_embed_kmeans_heirarchical(embed_mean, k=512, levels=2)
-    print(codebook.shape, codebook_indices.shape)
-    assert len(codebook_indices.unique()) == len(codebook)
+    # codebook, codebook_indices = quantize_embed_kmeans_heirarchical(embed_mean, k=512, levels=2)
+    # print(codebook.shape, codebook_indices.shape)
+    # assert len(codebook_indices.unique()) == len(codebook)
+
+    embed_mean, assignment = quantize_image_patch(embed, patch_size=6)
+    print(embed_mean.shape, assignment.shape)
+    print('Reconstruction error:', torch.mean(torch.abs(embed - embed_mean[assignment])).item())
