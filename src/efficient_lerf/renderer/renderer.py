@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from efficient_lerf.data.common import TorchTensor
-from nerfstudio.cameras.cameras import Cameras
 
 
 class Renderer(ABC):
@@ -26,7 +25,7 @@ class Renderer(ABC):
         Returns camera transform and scale from input to renderer space.
         """
 
-    def render(self, name: str, camera: Cameras) -> iter:
+    def render(self, name: str, camera: any) -> iter:
         """
         Returns an iterator over the rendered features `name` for the given `camera`.
         """

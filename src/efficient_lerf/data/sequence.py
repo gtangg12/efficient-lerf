@@ -13,12 +13,17 @@ from nerfstudio.cameras.cameras import Cameras
 from efficient_lerf.data.common import TorchTensor
 from efficient_lerf.utils.math import pad_poses, upsample_feature_map
 
+import sys
+sys.path.append('third_party/LangSplat')
+from scene.cameras import Camera
+sys.path.pop()
+
 
 @dataclass
 class FrameSequence:
     """
     """
-    cameras: Cameras
+    cameras: Cameras | list[Camera]
     images: TorchTensor['N', 'H', 'W', 3]
     depths: TorchTensor['N', 'H', 'W'] = None
 
@@ -38,10 +43,12 @@ class FrameSequence:
         sequence = {}
         for k, _ in asdict(self).items():
             v = getattr(self, k) # asdict recursively converts non-primitives to dict, including Cameras
-            if isinstance(v, torch.Tensor) and len(v) == len(self):
+            if isinstance(v, torch.Tensor):
                 sequence[k] = v[indices]
             elif isinstance(v, Cameras):
                 sequence[k] = v[indices]
+            elif isinstance(v, list):
+                sequence[k] = [v[i] for i in indices]
             else:
                 sequence[k] = v
         sequence['codebook_vectors'] = {k: v[indices] for k, v in self.codebook_vectors.items()}
@@ -59,7 +66,7 @@ class FrameSequence:
 
         return (
             f"FrameSequence(\n"
-            f"  cameras={self.cameras.camera_to_worlds.shape},\n"
+            f"  cameras={len(self.cameras)},\n"
             f"  images={images_shape},\n"
             f"  depths={depths_shape},\n"
             f"  codebook_vectors={codebook_vectors_shapes},\n"

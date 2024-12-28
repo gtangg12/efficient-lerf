@@ -12,10 +12,17 @@ from efficient_lerf.data.common import TorchTensor, DATASET_DIR
 from efficient_lerf.renderer.renderer import Renderer
 
 
-def load_pipeline(checkpoint: Path, device='cuda') -> VanillaPipeline:
+def latest_checkpoint(path: Path | str) -> Path:
+    path = Path(path) / 'lerf'
+    name = natsorted(path.glob('*'))[-1]
+    return path / name
+
+
+def load_pipeline(checkpoint: Path | str, device='cuda') -> VanillaPipeline:
     """ 
     Load LERF nerfstudio pipeline from checkpoint dir `outputs`.
     """
+    checkpoint = latest_checkpoint(checkpoint)
     with open(checkpoint / 'config.yml') as f:
         config = yaml.unsafe_load(f)
         config.load_dir = checkpoint / 'nerfstudio_models'
@@ -25,20 +32,24 @@ def load_pipeline(checkpoint: Path, device='cuda') -> VanillaPipeline:
     return pipeline
 
 
-def latest_checkpoint(path: Path | str) -> Path:
-    path = Path(path) / 'lerf'
-    name = natsorted(path.glob('*'))[-1]
-    return path / name
-
-
 class LERFRenderer(Renderer):
-    """
+    """ 
+    LERF renderer class that wraps around nerfstudio pipeline.
+    
+    Defines the following rendering methods:
+        - render_clip: Returns iterator for clip features at different scales
+        - render_dino: Returns iterator for dino feature
+        - render_lerf: Renders rendered outputs from the original LERF pipeline
+
+    Defines the following search methods:
+        - find_clip: Returns relevancy scores for each positive language query
+        - find_dino: Returns relevancy scores for each positive embedding query
     """
     def __init__(self, name: str, device='cuda'):
         """
         Constructs LERF pipeline and rendering scales.
         """
-        super().__init__(latest_checkpoint(DATASET_DIR / 'lerf/outputs' / name), device)
+        super().__init__(DATASET_DIR / 'lerf/outputs' / name, device)
         self.pipeline = load_pipeline(self.checkpoint, self.device)
         self.model = self.pipeline.model
         self.model.render_setting = None
@@ -54,7 +65,7 @@ class LERFRenderer(Renderer):
         self.disable_model_cache()
 
     def feature_names(self) -> dict:
-        return {'clip': 30, 'dino': 1}
+        return {'clip': self.pipeline.model.config.n_scales, 'dino': 1}
     
     def get_camera_transform(self) -> tuple:
         return self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale, \

@@ -1,13 +1,12 @@
 import os
 import json
 from abc import abstractmethod
-from glob import glob
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import torch
-from natsort import natsorted
 from nerfstudio.cameras.cameras import Cameras, CAMERA_MODEL_TO_TYPE
 from nerfstudio.cameras.camera_utils import get_distortion_params
 
@@ -17,6 +16,12 @@ from efficient_lerf.data.sequence import FrameSequence
 import sys
 sys.path.append('third_party/LangSplat')
 from scene.dataset_readers import sceneLoadTypeCallbacks
+from utils.camera_utils import cameraList_from_camInfos
+sys.path.pop()
+
+
+def process_slice(frames: list, slice: tuple) -> list:
+    return frames[slice[0]:slice[1]:slice[2]] if slice[1] is not None else frames[slice[0]::slice[2]]
 
 
 class FrameSequenceReader:
@@ -67,22 +72,22 @@ class LERFFrameSequenceReader(FrameSequenceReader):
     def read_sequence(self, slice: tuple) -> FrameSequence:
         """
         """
+        transforms = json.load(open(self.data_dir / 'transforms.json', 'r'))
+        
         def extract_frames(key) -> list:
             if key in transforms:
                 return transforms[key]
             frames = [data[key] for data in transforms['frames']]
-            frames = frames[slice[0]:slice[1]:slice[2]] if slice[1] else frames[slice[0]::slice[2]]
+            frames = process_slice(frames, slice)
             return frames
         
         def filename_downscale(filename: str) -> str:
             return filename.replace('images', f'images_{self.downscale}') if self.downscale > 1 else filename
-        
-        transforms = json.load(open(self.data_dir / 'transforms.json', 'r'))
 
         CAMERA_INTRINSICS_DISTORTION = ['k1', 'k2', 'k3', 'k4', 'p1', 'p2']
         distortion_params = {k: transforms[k] for k in CAMERA_INTRINSICS_DISTORTION if k in transforms}
         cameras = Cameras(
-            camera_to_worlds=torch.tensor(extract_frames('transform_matrix'))[:, :3, :], # nerfstudio 3x4 convention
+            camera_to_worlds=torch.tensor(extract_frames('transform_matrix'))[:, :3, :], # OpenGL/Blender cam2world
             fx=torch.tensor(extract_frames('fl_x')),
             fy=torch.tensor(extract_frames('fl_y')),
             cx=torch.tensor(extract_frames('cx')),
@@ -93,11 +98,10 @@ class LERFFrameSequenceReader(FrameSequenceReader):
             distortion_params=get_distortion_params(**distortion_params)
         )
         cameras.rescale_output_resolution(scaling_factor=1 / self.downscale)
-        image_filenames = [os.path.join(self.data_dir, filename) for filename in extract_frames('file_path')]
-        return FrameSequence(
-            cameras=cameras, 
-            images=torch.stack([self.load_image(filename_downscale(filename)) for filename in image_filenames])
+        images = torch.stack([
+            self.load_image(filename_downscale(self.data_dir / filename)) for filename in extract_frames('file_path')]
         )
+        return FrameSequence(cameras=cameras, images=images)
     
 
 class LangSplatFrameSequenceReader(FrameSequenceReader):
@@ -112,9 +116,18 @@ class LangSplatFrameSequenceReader(FrameSequenceReader):
         """
         """
         scene_info = sceneLoadTypeCallbacks['Colmap'](self.data_dir, images='images', eval=False)
-
         
-    
+        def extract_frames(key) -> list:
+            frames = [getattr(camera_info, key) for camera_info in scene_info.train_cameras]
+            frames = process_slice(frames, slice)
+            return frames 
+        
+        cameras = cameraList_from_camInfos(
+            scene_info.train_cameras, resolution_scale=1, args=SimpleNamespace(resolution=-1, data_device='cpu')
+        )
+        images = torch.stack([torch.from_numpy(np.array(x)) for x in extract_frames('image')])
+        return FrameSequence(cameras=cameras, images=images)
+
 
 if __name__ == '__main__':
     dataset = 'figurines'
@@ -122,5 +135,11 @@ if __name__ == '__main__':
     reader = LERFFrameSequenceReader(dataset)
     sequence = reader.read(slice=(0, 10, 1))
     print(sequence.cameras.shape)
+    print(sequence.images.shape)
+    print(sequence.metadata)
+
+    reader = LangSplatFrameSequenceReader(dataset)
+    sequence = reader.read(slice=(0, 10, 1))
+    print(len(sequence.cameras))
     print(sequence.images.shape)
     print(sequence.metadata)
