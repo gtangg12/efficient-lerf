@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import copy
 import os
+from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from nerfstudio.cameras.cameras import Cameras
 
@@ -19,11 +21,28 @@ from scene.cameras import Camera
 sys.path.pop()
 
 
+def gsplat_camera2namespace(camera: Camera) -> Namespace:
+    """
+    Serialize a gsplat Camera object to a Namespace object for parameter passing.
+    """
+    return Namespace(
+        colmap_id=camera.colmap_id,
+        R=camera.R,
+        T=camera.T,
+        FoVx=camera.FoVx,
+        FoVy=camera.FoVy,
+        image=camera.original_image,
+        image_name=camera.image_name,
+        uid=camera.uid,
+        gt_alpha_mask=None,
+    )
+
+
 @dataclass
 class FrameSequence:
     """
     """
-    cameras: Cameras | list[Camera]
+    cameras: Cameras | list[Camera] # support nerfstudio and gsplat cameras
     images: TorchTensor['N', 'H', 'W', 3]
     depths: TorchTensor['N', 'H', 'W'] = None
 
@@ -37,7 +56,7 @@ class FrameSequence:
         """
         return len(self.images)
     
-    def __getitem__(self, indices: list[int]) -> FrameSequence:
+    def __getitem__(self, indices: slice) -> FrameSequence:
         """
         """
         sequence = {}
@@ -48,7 +67,7 @@ class FrameSequence:
             elif isinstance(v, Cameras):
                 sequence[k] = v[indices]
             elif isinstance(v, list):
-                sequence[k] = [v[i] for i in indices]
+                sequence[k] = v[indices]
             else:
                 sequence[k] = v
         sequence['codebook_vectors'] = {k: v[indices] for k, v in self.codebook_vectors.items()}
@@ -80,15 +99,34 @@ class FrameSequence:
         """
         return copy.deepcopy(self)
     
-    def transform_cameras(self, scale: float, trans: TorchTensor[4, 4]) -> Cameras:
+    def rescale_camera_resolution(self, scale: float) -> None:
         """
         """
-        cameras = copy.deepcopy(self.cameras)
-        cameras.camera_to_worlds = pad_poses(cameras.camera_to_worlds)
-        cameras.camera_to_worlds = trans @ cameras.camera_to_worlds
-        cameras.camera_to_worlds[:, :3, 3] *= scale
-        return cameras
-    
+        if isinstance(self.cameras, Cameras):
+            self.cameras.rescale_output_resolution(scaling_factor=scale)
+        else:
+            outputs = []
+            for camera in self.cameras:
+                namespace = gsplat_camera2namespace(camera) # gsplat does not scale fx, fy, cx, cy
+                namespace.image = F.interpolate(camera.original_image[None, ...], scale_factor=scale, mode='bilinear')[0]
+                outputs.append(Camera(**vars(namespace)))
+            self.cameras = outputs
+
+    def transform_cameras(self, scale: float, trans: TorchTensor[4, 4]) -> None:
+        """
+        """
+        if isinstance(self.cameras, Cameras):
+            self.cameras.camera_to_worlds = trans @ pad_poses(self.cameras.camera_to_worlds)
+            self.cameras.camera_to_worlds[:, :3, 3] *= scale
+        else:
+            outputs = []
+            for camera in self.cameras:
+                namespace = gsplat_camera2namespace(camera)
+                namespace.R = (trans[:3, :3] @ camera.R).numpy()
+                namespace.T = ((trans[:3, 3] + camera.T) * scale).numpy()
+                outputs.append(Camera(**vars(namespace)))
+            self.cameras = outputs
+
     def feature_map(self, name: str, index: int, scale: int = None, upsample=True) -> TorchTensor['H', 'W', 'd']:
         """
         """

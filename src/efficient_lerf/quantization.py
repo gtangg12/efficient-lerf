@@ -70,8 +70,8 @@ class FeatureMapQuantization:
     def quantize(self, sequence: FrameSequence, renderer: Renderer, pca: dict = None, index=None) -> FrameSequence:
         """
         """
-        cameras = sequence.transform_cameras(*renderer.get_camera_transform())
-        M = len(renderer.scales)
+        sequence = sequence.clone()
+        sequence.transform_cameras(*renderer.get_camera_transform())
         index = index if index is not None else 0
 
         accum_embed_means = defaultdict(list)
@@ -142,7 +142,7 @@ class FeatureMapQuantization:
         
         print('Running per frame local quantization')
 
-        for i, camera in tqdm(enumerate(cameras)):
+        for i, camera in tqdm(enumerate(sequence.cameras)):
             iter = i + index
 
             image = sequence.images[i]

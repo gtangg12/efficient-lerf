@@ -1,8 +1,7 @@
-import os
 import json
 from abc import abstractmethod
+from argparse import Namespace
 from pathlib import Path
-from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -123,7 +122,7 @@ class LangSplatFrameSequenceReader(FrameSequenceReader):
             return frames 
         
         cameras = cameraList_from_camInfos(
-            scene_info.train_cameras, resolution_scale=1, args=SimpleNamespace(resolution=-1, data_device='cpu')
+            scene_info.train_cameras, resolution_scale=1, args=Namespace(resolution=-1, data_device='cpu')
         )
         images = torch.stack([torch.from_numpy(np.array(x)) for x in extract_frames('image')])
         return FrameSequence(cameras=cameras, images=images)
