@@ -113,11 +113,11 @@ if __name__ == '__main__':
 
     from efficient_lerf.utils.visualization import *
 
-    embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents=1024, compactness=10)
+    embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents=2048, compactness=0)
     print(embed_mean.shape, assignment.shape)
-    print('Reconstruction error:', torch.mean(torch.abs(embed - embed_mean[assignment])).item())
+    print('Reconstruction error:', torch.mean(torch.sum(embed * embed_mean[assignment], dim=-1)).item())
 
-    codebook, codebook_indices = quantize_embed_kmeans(embed_mean, k=512)
+    codebook, codebook_indices = quantize_embed_kmeans(embed_mean, k=64)
     print(codebook.shape, codebook_indices.shape)
     assert len(codebook_indices.unique()) == len(codebook)
 
@@ -125,6 +125,6 @@ if __name__ == '__main__':
     # print(codebook.shape, codebook_indices.shape)
     # assert len(codebook_indices.unique()) == len(codebook)
 
-    embed_mean, assignment = quantize_image_patch(embed, patch_size=6)
+    embed_mean, assignment = quantize_image_patch(embed, patch_size=4)
     print(embed_mean.shape, assignment.shape)
-    print('Reconstruction error:', torch.mean(torch.abs(embed - embed_mean[assignment])).item())
+    print('Reconstruction error:', torch.mean(torch.sum(embed * embed_mean[assignment], dim=-1)).item())
