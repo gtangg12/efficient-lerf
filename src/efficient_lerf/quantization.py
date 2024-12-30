@@ -13,7 +13,6 @@ from efficient_lerf.data.sequence import FrameSequence
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.utils.visualization import *
 from efficient_lerf.quantization_methods import *
-from efficient_lerf.quantization_interpolation import *
 
 
 def name_clip(j):
@@ -36,7 +35,8 @@ class FeatureMapQuantization:
         """
         start_time = time.time()
 
-        sequence_downsampled = sequence_downsample(sequence, downsample=self.config.downsample)
+        sequence_downsampled = sequence.clone()
+        sequence_downsampled.rescale_camera_resolution(scale=1 / self.config.downsample)
         
         pca = defaultdict(dict)
         codebook_vectors = defaultdict(list)

@@ -21,6 +21,12 @@ from scene.cameras import Camera
 sys.path.pop()
 
 
+def rescale_tensor(tensor: TorchTensor['B', 'H', 'W', 'C'], scale: float, mode='bilinear') -> torch.Tensor:
+    tensor = tensor.permute(0, 3, 1, 2)
+    tensor = F.interpolate(tensor, scale_factor=scale, mode=mode)
+    return tensor.permute(0, 2, 3, 1)
+
+
 def gsplat_camera2namespace(camera: Camera) -> Namespace:
     """
     Serialize a gsplat Camera object to a Namespace object for parameter passing.
@@ -111,6 +117,10 @@ class FrameSequence:
                 namespace.image = F.interpolate(camera.original_image[None, ...], scale_factor=scale, mode='bilinear')[0]
                 outputs.append(Camera(**vars(namespace)))
             self.cameras = outputs
+        
+        self.images = rescale_tensor(self.images, scale)
+        self.depths = rescale_tensor(self.depths, scale, mode='nearest') if self.depths is not None else None
+        # TODO: rescale codebook_indices
 
     def transform_cameras(self, scale: float, trans: TorchTensor[4, 4]) -> None:
         """

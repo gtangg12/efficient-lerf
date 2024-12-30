@@ -54,7 +54,7 @@ def compute_superpixels(image: TorchTensor['H', 'W', 3], ncomponents=1024, compa
 
 def quantize_image_superpixel(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], ncomponents=1024, compactness=10) -> tuple:
     """
-    Returns: embed_mean: (k, d), assignemnts: (h, w)
+    Returns: embed_mean: (k, d), assignments: (h, w)
     """
     assignment = compute_superpixels(image, ncomponents, compactness)
 
@@ -78,9 +78,9 @@ def quantize_image_superpixel(image: TorchTensor['H', 'W', 3], embed: TorchTenso
     return embed_mean, assignment
 
 
-def quantize_image_patch(embed: TorchTensor['H', 'W', 'dim'], patch_size=16) -> tuple:
+def quantize_image_patch(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], patch_size=16) -> tuple:
     """
-    Returns: embed_mean: (k, d), assignemnts: (h, w).
+    Returns: embed_mean: (k, d), assignemnts: (h, w). Requires image for consistent interface.
     """
     H, W, D = embed.shape
     
@@ -100,10 +100,10 @@ def quantize_image_patch(embed: TorchTensor['H', 'W', 'dim'], patch_size=16) -> 
     rindices = torch.arange(H, device=embed.device).unsqueeze(1).expand(-1, W)
     cindices = torch.arange(W, device=embed.device).unsqueeze(0).expand(H, -1)
 
-    assignments = (rindices // patch_size) * patches_w + (cindices // patch_size) # (padH, padW)
-    assignments = assignments[:H, :W] # (H, W)
+    assignment = (rindices // patch_size) * patches_w + (cindices // patch_size) # (padH, padW)
+    assignment = assignment[:H, :W] # (H, W)
 
-    return embed_mean, assignments
+    return embed_mean, assignment
 
 
 if __name__ == '__main__':
@@ -125,6 +125,6 @@ if __name__ == '__main__':
     # print(codebook.shape, codebook_indices.shape)
     # assert len(codebook_indices.unique()) == len(codebook)
 
-    embed_mean, assignment = quantize_image_patch(embed, patch_size=4)
+    embed_mean, assignment = quantize_image_patch(image, embed, patch_size=4)
     print(embed_mean.shape, assignment.shape)
     print('Reconstruction error:', torch.mean(torch.sum(embed * embed_mean[assignment], dim=-1)).item())
