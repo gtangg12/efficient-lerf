@@ -31,7 +31,7 @@ def convert_dict_tuple2nested(d):
     return r
 
 
-def summarize(path: Path | str, accum: dict) -> dict:
+def summarize(path: Path | str, accum: dict, reduce_fn=mean) -> dict:
     """
     Average metrics over all scenes.
     """
@@ -41,7 +41,7 @@ def summarize(path: Path | str, accum: dict) -> dict:
             for k, v in metrics.items():
                 summary[(feature_name, RendererT.__name__, k)].append(v)
     for k, v in summary.items():
-        summary[k] = mean(v)
+        summary[k] = reduce_fn(v)
     summary = convert_dict_tuple2nested(summary)
     with open(path / 'summary.json', 'w') as f:
         json.dump(summary, f, indent=4)
@@ -54,8 +54,9 @@ def setup(path: Path | str, scene: str, RendererT: type) -> tuple:
     """
     renderer_name = RendererT.__name__
     path = Path(path) / renderer_name / scene
-    if path.exists():
-        with open(path / 'stats.json', 'r') as f:
+    filename = path / 'stats.json'
+    if filename.exists():
+        with open(filename, 'r') as f:
             return json.load(f), path, renderer_name
     path.mkdir(parents=True, exist_ok=True)
     return None, path, renderer_name 
