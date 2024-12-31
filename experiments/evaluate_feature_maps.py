@@ -5,96 +5,77 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from efficient_lerf.data.common import TorchTensor, DATASET_DIR, DATASETS, load_checkpoint
-from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
+from efficient_lerf.data.common import TorchTensor
 from efficient_lerf.data.sequence import FrameSequence, load_sequence
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.utils.math import norm, mean
 
-
-def distance(embed_targ: TorchTensor['N', 'dim'], embed_pred: TorchTensor['N', 'dim']) -> float:
-    """
-    """
-    embed_targ = norm(embed_targ.flatten(0, -2), dim=-1)
-    embed_pred = norm(embed_pred.flatten(0, -2), dim=-1)
-    return torch.mean(torch.sum(embed_targ * embed_pred, dim=-1)).item()
+from experiments.common import DATASETS, RENDERERS, summarize, setup
 
 
-def distance_random(embed_targ: TorchTensor['N', 'dim'], embed_pred: TorchTensor['N', 'dim'], nrandom=1024) -> float:
+SAVE_DIR = Path('experiments/feature_maps')
+
+
+def distance(embed_targ: TorchTensor['H', 'W', 'dim'], embed_pred: TorchTensor['H', 'W', 'dim']) -> float:
     """
     """
-    embed_targ = norm(embed_targ.flatten(0, -2), dim=-1)
-    embed_pred = norm(embed_pred.flatten(0, -2), dim=-1)
-    embed_targ = embed_targ[torch.randperm(embed_targ.shape[0])[:nrandom]]
-    embed_pred = embed_pred[torch.randperm(embed_pred.shape[0])[:nrandom]]
+    distances = torch.sum(embed_targ * embed_pred, dim=-1)
+    return torch.mean(distances).item()
+
+
+def distance_baseline(embed_targ: TorchTensor['H', 'W', 'dim']) -> float:
+    """
+    """
+    embed_pred = embed_targ.mean(dim=(0, 1))
     return distance(embed_targ, embed_pred)
 
 
-def evaluate_clip(sequence: FrameSequence, renderer: Renderer) -> dict:
+from efficient_lerf.utils.visualization import *
+from efficient_lerf.utils.math import *
+
+def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer) -> dict:
     """
     """
-    cameras = sequence.transform_cameras(*renderer.get_camera_transform())
+    sequence = sequence.clone()
+    sequence.transform_cameras(*renderer.get_camera_transform())
     
     stats = defaultdict(list)
 
-    for i, camera in tqdm(enumerate(cameras)):
-
-        renderer.enable_model_cache()
-        
-        for j, scale in enumerate(renderer.scales):
-            embed_targ = renderer.render_scale(camera, scale).cpu()
-            embed_pred = sequence.clip_codebook[sequence.clip_codebook_indices[i, j]]
-            stats[scale].append(distance(embed_targ, embed_pred))
-            stats['random'].append(distance_random(embed_targ, embed_pred))
-        
-        renderer.disable_model_cache()
+    for i, camera in tqdm(enumerate(sequence.cameras)):
+        for j, embed in enumerate(renderer.render(name, camera)):
+            embed_pred = sequence.feature_map(name, i, j, upsample=True) # match original resolution
+            embed_pred = norm(embed_pred , dim=-1)
+            embed_targ = norm(embed.cpu(), dim=-1)
+            stats[j].append(distance(embed_targ, embed_pred))
+            stats['baseline'].append(distance_baseline(embed_targ))
     
     stats = {k: mean(v) for k, v in stats.items()}
-    stats['scale_mean'] = mean(list(stats.values()))
+    stats['scale_mean'] = mean([v for k, v in stats.items() if k != 'baseline'])
     return stats
 
 
-def evaluate_dino(sequence: FrameSequence, renderer: Renderer) -> dict:
+def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, stride=20) -> dict:
     """
     """
-    cameras = sequence.transform_cameras(*renderer.get_camera_transform())
+    stats, path, renderer_name = setup(SAVE_DIR, scene, RendererT)
+    if stats is not None:
+        return stats
+    print(f'Evaluating feature maps for renderer {renderer_name} for scene {scene}')
     
-    stats = defaultdict(list)
+    reader, renderer = FrameSequenceReaderT(scene), RendererT(scene)
+    sequence = load_sequence(reader.data_dir / 'sequence/sequence.pt')[::stride]
 
-    for i, camera in tqdm(enumerate(cameras)):
-        embed_targ = renderer.render(camera)['dino'].cpu()
-        embed_pred = sequence.dino_codebook[sequence.dino_codebook_indices[i]]
-        stats['dino'].append(distance(embed_targ, embed_pred))
-        stats['random'].append(distance_random(embed_targ, embed_pred))
-
-    stats = {k: mean(v) for k, v in stats.items()}
+    stats = {}
+    for feature_name in renderer.feature_names():
+        stats[feature_name] = evaluate_feature(feature_name, sequence, renderer)
+    with open(path / 'stats.json', 'w') as f:
+        json.dump(stats, f, indent=4)
     return stats
-
-
-def evaluate_scene(name: str) -> dict:
-    """
-    """
-    print(f'Evaluating feature maps for scene {name}')
-    
-    reader = LERFFrameSequenceReader(DATASET_DIR, name)
-    sequence = load_sequence(reader.data_dir / 'sequence')
-    renderer = Renderer(load_checkpoint(name))
-    stats_clip = evaluate_clip(sequence, renderer)
-    stats_dino = evaluate_dino(sequence, renderer)
-    return stats_clip, stats_dino
 
 
 if __name__ == '__main__':
-    import os
-    experiment = 'experiments/feature_maps'
-    os.makedirs(experiment, exist_ok=True)
-    for scene in DATASETS:
-        path = Path(f'{experiment}/{scene}.json')
-        if path.exists():
-            continue
-        stats_clip, stats_dino = evaluate_scene(scene)
-        with open(path, 'w') as f:
-            json.dump({
-                'clip': stats_clip, 
-                'dino': stats_dino}, f, indent=4
-            )
+    accum = {}
+    for RendererT, FrameSequenceReaderT in RENDERERS:
+        for scene in DATASETS:
+            accum[(scene, RendererT)] = evaluate(scene, RendererT, FrameSequenceReaderT)
+    summarize(SAVE_DIR, accum)

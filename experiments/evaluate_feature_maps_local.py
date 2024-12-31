@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
 from tqdm import tqdm
 
-from efficient_lerf.data.common import DATASET_DIR
+from efficient_lerf.data.common import TorchTensor
 from efficient_lerf.data.sequence import FrameSequence, load_sequence
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.quantization_methods import quantize_image_patch, quantize_image_superpixel
@@ -21,6 +21,24 @@ SAVE_DIR = Path('experiments/feature_maps_local')
 
 def key(scale: int, method: str, params: dict) -> str:
     return f'{scale}@{method}@{str(params)}'
+
+
+def distance(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], method: callable) -> tuple:
+    """
+    """
+    embed = norm(embed.detach().cpu(), dim=-1)
+    embed_mean, assignment = method(image, embed)
+    quant = embed_mean[assignment]
+    quant_loss = torch.mean(torch.sum(embed * quant, dim=-1)).item()
+    return quant_loss, len(embed_mean)
+
+
+def distance_baseline(embed: TorchTensor['H', 'W', 'dim']) -> float:
+    """
+    """
+    quant_baseline = embed.reshape(-1, embed.shape[-1]).mean(0)
+    quant_baseline_loss = torch.mean(torch.sum(embed * quant_baseline, dim=-1)).item()
+    return quant_baseline_loss
 
 
 def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer, methods: dict, rescale=0.25) -> dict:
@@ -38,17 +56,12 @@ def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer, met
             for method in methods.keys():
                 method_fn = globals()[f'quantize_image_{method}']
                 for params in methods[method]['params']:
-                    embed = norm(embed.detach().cpu(), -1)
-                    embed_mean, assignment = method_fn(image, embed, **params)
-                    quant_loss = torch.mean(torch.sum(embed * embed_mean[assignment], dim=-1)).item()
                     stats[key(j, method, params)].append(
-                        (quant_loss, len(embed_mean))
+                        distance(image, embed, lambda args: method_fn(*args, **params))
                     )
-
-                    # Compute baseline
-                    embed_mean_baseline = embed.reshape(-1, embed.shape[-1]).mean(0)
-                    quant_loss_baseline = torch.mean(torch.sum(embed * embed_mean_baseline, dim=-1)).item()
-                    stats_baseline.append(quant_loss_baseline)
+                    stats_baseline.append(
+                        distance_baseline(embed)
+                    )
     
     scale_mean = defaultdict(list)
     for k, v in stats.items():
