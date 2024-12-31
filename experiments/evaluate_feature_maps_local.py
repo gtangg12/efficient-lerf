@@ -4,6 +4,7 @@ from pathlib import Path
 
 import torch
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LinearLocator, FormatStrFormatter
 from tqdm import tqdm
 
 from efficient_lerf.data.common import DATASET_DIR
@@ -112,7 +113,15 @@ def plot_comparison_curve(accum: dict, path: Path | str) -> None:
     """
     nplots = len(accum)
     feature_names = set(accum[list(accum.keys())[0]].keys())
+
+    baselines = {}
+    for feature_name in feature_names:
+        baselines[feature_name] = []
+        for (scene, RendererT), stats in accum.items():
+            baselines[feature_name].append(stats[feature_name].pop('baseline'))
     
+    colors = {'patch': 'purple', 'superpixel': 'orange'}
+
     for feature_name in feature_names:
         fig, axes = plt.subplots(1, nplots, figsize=(7.5 * nplots, 5), constrained_layout=True) # 1.5 aspect ratio
         if nplots == 1:
@@ -121,24 +130,27 @@ def plot_comparison_curve(accum: dict, path: Path | str) -> None:
         for i, ((scene, RendererT), stats) in enumerate(accum.items()):
             x = defaultdict(list)
             y = defaultdict(list)
-            feature_stats = stats[feature_name]
-            baseline = feature_stats.pop('baseline')
+            baseline = baselines[feature_name][i]
             for k, v in stats[feature_name].items():
                 _, method, _ = tuple(k.split('@'))
                 x[method].append(v[1])
                 y[method].append(v[0])
             for method in x.keys():
-                axes[i].plot(x[method], y[method], label=method)
-            axes[i].plot([0, max(x['patch'])], [baseline, baseline], label='feature map mean', linestyle='--')
+                axes[i].plot(x[method], y[method], label=method, color=colors[method], linewidth=4)
+            axes[i].plot([0, max(x['patch'])], [baseline, baseline], label='feature map mean', color='green', linewidth=4, linestyle='--')
 
-            axes[i].legend(loc='lower right', framealpha=1)
             axes[i].set_title(scene)
+            axes[i].set_facecolor('aliceblue')
             axes[i].set_xscale('log')
             axes[i].set_xlabel('Codebook Size')
             if i == 0:
                 axes[i].set_ylabel('Quantization Similarity')
+            axes[i].set_ylim(None, 1)
+            axes[i].yaxis.set_major_locator(LinearLocator(5))
+            axes[i].yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
 
-        fig.suptitle(f'Reconstruction Quality vs Codebook Size')
+        axes[-1].legend(loc='lower right', framealpha=1)
+        
         plt.savefig(f'{path}/{RendererT.__name__}/{feature_name}.png')
         plt.clf()
 
