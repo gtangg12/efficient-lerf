@@ -76,7 +76,6 @@ class FrameSequence:
                 sequence[k] = v[indices]
             else:
                 sequence[k] = v
-        sequence['codebook_vectors'] = {k: v[indices] for k, v in self.codebook_vectors.items()}
         sequence['codebook_indices'] = {k: v[indices] for k, v in self.codebook_indices.items()}
         return FrameSequence(**sequence)
     
