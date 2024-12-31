@@ -50,7 +50,7 @@ class FeatureMapQuantization:
             for name in renderer.feature_names():
                 codebook_vectors[name].append(batch.codebook_vectors[name])
                 codebook_indices[name].append(batch.codebook_indices[name] + counts[name])
-                counts[name] += len(codebook_vectors[name])
+                counts[name] += len(batch.codebook_vectors[name])
 
         for name in renderer.feature_names():
             sequence.codebook_vectors[name] = torch.cat(codebook_vectors[name], dim=0)
