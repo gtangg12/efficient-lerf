@@ -141,8 +141,8 @@ class FrameSequence:
         """
         features = self.codebook_vectors[name][self.codebook_indices[name][index][scale]]
         if upsample:
-            H = self.cameras[0].height
-            W = self.cameras[0].width
+            H = self.images[0].shape[0]
+            W = self.images[0].shape[1]
             features = upsample_feature_map(features, H, W)
         return features
 
