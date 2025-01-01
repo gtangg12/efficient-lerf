@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 import matplotlib.pyplot as plt
-from matplotlib.ticker import LinearLocator, FormatStrFormatter
+from matplotlib.ticker import LinearLocator, NullLocator, FormatStrFormatter
 from tqdm import tqdm
 
 from efficient_lerf.data.common import TorchTensor
@@ -150,7 +150,11 @@ def plot_comparison_curve(accum: dict, path: Path | str) -> None:
                 y[method].append(v[0])
             for method in x.keys():
                 axes[i].plot(x[method], y[method], label=method, color=colors[method], linewidth=4)
-            axes[i].plot([0, max(x['patch'])], [baseline, baseline], label='feature map mean', color='green', linewidth=4, linestyle='--')
+            axes[i].plot(
+                [0, max(x['patch'])],
+                [baseline, baseline],
+                label='feature map mean', color=(1.00, 0.30, 0.30), linewidth=4, linestyle='--'
+            )
 
             axes[i].set_title(scene)
             axes[i].set_facecolor('aliceblue')
@@ -159,6 +163,7 @@ def plot_comparison_curve(accum: dict, path: Path | str) -> None:
             if i == 0:
                 axes[i].set_ylabel('Quantization Similarity')
             axes[i].set_ylim(None, 1)
+            axes[i].xaxis.set_minor_locator(NullLocator())
             axes[i].yaxis.set_major_locator(LinearLocator(5))
             axes[i].yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
 
