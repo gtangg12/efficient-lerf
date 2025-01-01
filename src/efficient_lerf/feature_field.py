@@ -16,10 +16,11 @@ from efficient_lerf.utils.math import compute_relevancy
 class VQFeatureField:
     """
     """
-    def __init__(self, config: OmegaConf, sequence: FrameSequence, renderer: Renderer):
+    def __init__(self, config: OmegaConf, sequence: FrameSequence, renderer: Renderer, device='cuda'):
         """
         """
         self.config = config
+        self.device = device
         self.renderer = renderer
         self.sequence = self.quantize(sequence)
     
@@ -41,15 +42,15 @@ class VQFeatureField:
     ]:
         """
         """
-        codebook_vectors = self.sequence.codebook_vectors[name] # (k, dim)
-        codebook_indices = self.sequence.codebook_indices[name] # (N, M, H, W)
+        codebook_vectors = self.sequence.codebook_vectors[name].to(self.device) # (k, dim)
+        codebook_indices = self.sequence.codebook_indices[name].to(self.device) # (N, M, H, W)
 
         probs = self.renderer.find(name, positives, codebook_vectors) # (N, k)
         
         scores, relevancy_maps = [], []
-        for i, probs in enumerate(probs):
-            scores.append(probs.max().item())
-            relevancy_maps.append(compute_relevancy(probs[codebook_indices].cpu(), threshold))
+        for i, prob in enumerate(probs):
+            scores.append(prob.max().item())
+            relevancy_maps.append(compute_relevancy(prob[codebook_indices], threshold).cpu())
         return torch.tensor(scores), torch.stack(relevancy_maps)
 
     def edit(self, edit_method='extract', find_name='clip', positive=None, threshold=None, **kwargs) -> None:
