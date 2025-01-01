@@ -10,6 +10,7 @@ from efficient_lerf.renderer.renderer_langsplat import LangSplatRenderer
 from efficient_lerf.quantization import *
 from efficient_lerf.quantization_methods import *
 from efficient_lerf.feature_field_editor import VQFeatureFieldEditor
+from efficient_lerf.utils.math import compute_relevancy
 
 
 class VQFeatureField:
@@ -44,14 +45,11 @@ class VQFeatureField:
         codebook_indices = self.sequence.codebook_indices[name] # (N, M, H, W)
 
         probs = self.renderer.find(name, positives, codebook_vectors) # (N, k)
-
+        
         scores, relevancy_maps = [], []
         for i, probs in enumerate(probs):
             scores.append(probs.max().item())
-            relevancy = probs[codebook_indices].cpu() # (N, M, H, W)
-            relevancy = relevancy.max(1)[0] # (N, H, W)
-            relevancy = relevancy > threshold
-            relevancy_maps.append(relevancy)
+            relevancy_maps.append(compute_relevancy(probs[codebook_indices].cpu(), threshold))
         return torch.tensor(scores), torch.stack(relevancy_maps)
 
     def edit(self, edit_method='extract', find_name='clip', positive=None, threshold=None, **kwargs) -> None:

@@ -59,3 +59,9 @@ def upsample_feature_map(x: TorchTensor['H', 'W', 'dim'], upH, upW):
     x = F.interpolate(x[None].float(), (upH, upW), mode='nearest')[0].to(x.dtype)
     x = x.permute(1, 2, 0)
     return x
+
+
+def compute_relevancy(probs: TorchTensor['N', 'M', 'H', 'W'], threshold: float) -> TorchTensor['N', 'H', 'W']:
+    """
+    """
+    return probs.max(1)[0] > threshold
