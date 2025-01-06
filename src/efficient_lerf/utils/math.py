@@ -64,4 +64,7 @@ def upsample_feature_map(x: TorchTensor['H', 'W', 'dim'], upH, upW):
 def compute_relevancy(probs: TorchTensor['N', 'M', 'H', 'W'], threshold: float) -> TorchTensor['N', 'H', 'W']:
     """
     """
-    return probs.amax(1) > threshold
+    _, index = probs.amax(dim=[2, 3]).max(dim=1)          # (N,)
+    probs = probs[torch.arange(len(probs)).long(), index] # (N, H, W)
+    probs[probs < threshold] = 0
+    return probs
