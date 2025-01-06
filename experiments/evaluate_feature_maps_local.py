@@ -121,7 +121,7 @@ def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, stride=20)
     return stats
 
 
-def plot_comparison_curve(accum: dict, path: Path | str) -> None:
+def plot_comparison_curve(accum: dict, filename: Path | str) -> None:
     """
     """
     nplots = len(accum)
@@ -168,8 +168,8 @@ def plot_comparison_curve(accum: dict, path: Path | str) -> None:
             axes[i].yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
 
         axes[-1].legend(loc='lower right', framealpha=1)
-        
-        plt.savefig(f'{path}/{RendererT.__name__}/{feature_name}.png')
+
+        fig.savefig(f'{filename}/{feature_name}.png')
         plt.clf()
 
 
@@ -179,4 +179,4 @@ if __name__ == '__main__':
         for scene in DATASETS:
             stats = evaluate(scene, RendererT, FrameSequenceReaderT)
             accum[(scene, RendererT)] = stats
-        plot_comparison_curve(accum, SAVE_DIR)
+        plot_comparison_curve(accum, SAVE_DIR / f'{RendererT.__name__}')

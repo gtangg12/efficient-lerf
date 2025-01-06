@@ -48,13 +48,14 @@ def summarize(path: Path | str, accum: dict, reduce_fn=mean) -> dict:
     return summary
 
 
-def setup(path: Path | str, scene: str, RendererT: type) -> tuple:
+def setup(path: Path | str, scene: str, RendererT: type, name='stats.json') -> tuple:
     """
     Create output directory and load stats if available.
     """
     renderer_name = RendererT.__name__
     path = Path(path) / renderer_name / scene
-    filename = path / 'stats.json'
+    filename = path / name
+    print(filename)
     if filename.exists():
         with open(filename, 'r') as f:
             return json.load(f), path, renderer_name

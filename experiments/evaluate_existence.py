@@ -1,22 +1,29 @@
-import yaml
 import json
-from collections import defaultdict, Counter
+import os
+import yaml
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-import torch
+import matplotlib.pyplot as plt
 from omegaconf import OmegaConf
 from tqdm import tqdm
+from sklearn.metrics import precision_recall_curve
 
 from efficient_lerf.data.common import DATASET_DIR, CONFIGS_DIR
-from efficient_lerf.data.sequence_reader import LERFFrameSequenceReader
-from efficient_lerf.renderer.renderer import Renderer
+from efficient_lerf.utils.math import compute_relevancy
 from efficient_lerf.utils.visualization import *
-from efficient_lerf.feature_field import DiscreteFeatureField, load_model
+from efficient_lerf.feature_field import VQFeatureField, load_model
+
+from experiments.common import DATASETS, RENDERERS, setup
+
+
+SAVE_DIR = Path('experiments/existence')
 
 
 def load_labels(data_dir: Path | str) -> dict:
     """
+    Load LERF dataset annotations.
     """
     labels = {}
     try:
@@ -34,111 +41,134 @@ def load_labels(data_dir: Path | str) -> dict:
     return labels
 
 
-def exist_sequence(model: DiscreteFeatureField, positives: list[str]) -> dict:
+def exist_sequence(model: VQFeatureField, labels: dict, feature_name='clip', path: Path | str = None) -> dict:
     """
     """
-    return model.find_clip(positives)
+    scores_tensor, relevancy_maps_tensor = model.find(feature_name, labels.keys())
+    scores = {}
+    for j, (positive, exist) in enumerate(labels.items()):
+        scores[positive] = scores_tensor[j].item()
+        if path is not None and exist:
+            for i, relevancy_map in enumerate(relevancy_maps_tensor[j]):
+                visualize_relevancy(relevancy_map.cpu().numpy()).save(f'{path}/visualizations/{positive}_{i}_ours.png')
+    return scores
 
 
-def exist_renderer(model: DiscreteFeatureField, positives: list[str]) -> dict:
+def exist_renderer(model: VQFeatureField, labels: dict, feature_name='clip', rescale=0.25, path: Path | str = None) -> dict:
     """
     """
     sequence = model.sequence
     renderer = model.renderer
 
-    cameras = sequence.transform_cameras(*renderer.get_camera_transform())
-
-    renderer.pipeline.image_encoder.set_positives(positives)
+    sequence = sequence.clone()
+    sequence.transform_cameras(*renderer.get_camera_transform())
+    sequence.rescale_camera_resolution(rescale) # match renderer resolution
 
     scores = defaultdict(lambda: 0)
-    relevancy_maps = defaultdict(list)
-    for camera in tqdm(cameras):
-        outputs = renderer.render_vanilla(camera)
-        for i in range(len(positives)):
-            positive = positives[i]
-            relevancy_map = outputs[f'relevancy_{i}'].squeeze(-1) # (H, W)
-            scores[positive] = max(scores[positive], relevancy_map.max().item())
-            relevancy_maps[positive].append(relevancy_map.cpu().numpy())
-    for k, v in relevancy_maps.items():
-        relevancy_maps[k] = np.stack(v)
-    return scores, relevancy_maps
+
+    for i, camera in tqdm(enumerate(sequence.cameras)):
+        probs = []
+        for embed in renderer.render(feature_name, camera):
+            probs.append(renderer.find(feature_name, labels.keys(), embed))
+        probs = torch.stack(probs, dim=1)
+        embed_scores = probs.amax(dim=[1, 2, 3])
+        embed_relevancy_maps = compute_relevancy(probs, threshold=0.5)
+        for j, (positive, exist) in enumerate(labels.items()):
+            scores[positive] = max(scores[positive], embed_scores[j].item())
+            if path is not None and exist:
+                visualize_relevancy(embed_relevancy_maps[j].cpu().numpy()).save(f'{path}/visualizations/{positive}_{i}_test.png')
+    return scores
 
 
-def evaluate_scene(name: str, experiment: Path | str) -> dict:
+def evaluate_scene(scene: str, RendererT: type, FrameSequenceReaderT: type) -> dict:
     """
     """
-    thresholds = np.linspace(0.5, 1, 11)
-    min_union = 128
+    labels = load_labels(DATASET_DIR / f'lerf/LERF Datasets/{scene}')
 
-    print(f'Evaluating existence for scene {name}')
+    scores, path, renderer_name = setup(SAVE_DIR, scene, RendererT, name='scores.json')
+    if scores is not None:
+        return scores, labels
+    os.makedirs(f'{path}/visualizations', exist_ok=True)
+    print(f'Evaluating feature maps for renderer {renderer_name} for scene {scene}')
 
-    reader = LERFFrameSequenceReader(DATASET_DIR, name)
-    labels = load_labels(reader.data_dir)
     config = OmegaConf.load(CONFIGS_DIR / 'template.yaml')
 
-    model = load_model(name, config)
-    positives = list(labels.keys())
-    scores_ours, relevancy_maps_ours = exist_sequence(model, positives)
-    scores_lerf, relevancy_maps_lerf = exist_renderer(model, positives)
+    model = load_model(scene, config, RendererT, FrameSequenceReaderT)
+    #model.sequence = model.sequence[::200]
+    scores_ours = exist_sequence(model, labels, path=path)
+    scores_test = exist_renderer(model, labels, path=path)
     
-    iou_t = Counter()
-    iou_t_counts = Counter()
-    iou_t_max = 0
-    iou_t_counts_max = 0
     for positive, exist in labels.items():
-        if not exist:
-            continue
-        print(f'{positive}: {scores_ours[positive]:.2f} (ours) vs {scores_lerf[positive]:.2f} (LERF)')
-        os.makedirs(f'{experiment}/visualizations/{name}/{positive}', exist_ok=True)
-        
-        for i in range(len(model.sequence)):
-            map_ours = relevancy_maps_ours[positive][i]
-            map_lerf = relevancy_maps_lerf[positive][i]
-            iou_max = None
-            for threshold in thresholds:
-                map_ours_t = np.array(map_ours)
-                map_lerf_t = np.array(map_lerf)
-                map_ours_t[map_ours < threshold] = 0
-                map_lerf_t[map_lerf < threshold] = 0
-                cap = ((map_ours_t > 0) & (map_lerf_t > 0)).sum()
-                cup = ((map_ours_t > 0) | (map_lerf_t > 0)).sum()
-                if cup > min_union:
-                    iou = cap / cup
-                    iou_t[threshold] += iou
-                    iou_t_counts[threshold] += 1
-                    if iou_max is None or iou > iou_max:
-                        iou_max = iou
-                visualize_relevancy(map_ours_t).save(f'{experiment}/visualizations/{name}/{positive}/{i}@{threshold:.2f}_ours.png')
-                visualize_relevancy(map_lerf_t).save(f'{experiment}/visualizations/{name}/{positive}/{i}@{threshold:.2f}_lerf.png')
-            if iou_max is not None:
-                iou_t_max += iou_max
-                iou_t_counts_max += 1
-    
-    for t in thresholds:
-        iou_t[t] = iou_t[t] / iou_t_counts[t] if iou_t_counts[t] > 0 else 0
-        print(f'IoU@{t}: {iou_t[t]}')
-    iou_t_max = iou_t_max / iou_t_counts_max if iou_t_counts_max > 0 else 0
-    print(f'IoU@max: {iou_t_max}')
-    iou_t['max'] = iou_t_max
+        if exist: 
+            print(f'{positive}: {scores_ours[positive]:.2f} (ours) vs {scores_test[positive]:.2f} ({renderer_name})')
+    scores = {
+        'ours': scores_ours,
+        'test': scores_test,
+    }
+    with open(f'{path}/scores.json', 'w') as f:
+        json.dump(scores, f)
+    return scores, labels
 
-    return scores_ours, relevancy_maps_ours, \
-           scores_lerf, relevancy_maps_lerf, iou_t
+
+def plot_precision_recall_curve(accum_scores: dict, accum_labels: dict, name: str, filename: Path | str) -> None:
+    """
+    """
+    nplots = len(accum_scores)
+    fig, axes = plt.subplots(1, nplots, figsize=(7.5 * nplots, 5), constrained_layout=True) # 1.5 aspect ratio
+    if nplots == 1:
+        axes = [axes] # Ensure axes iterable
+
+    for i, (scene, outputs) in enumerate(accum_scores.items()):
+        labels = accum_labels[scene]
+        probs_ours = np.array([outputs['ours'][label] for label in labels])
+        probs_test = np.array([outputs['test'][label] for label in labels])
+        targs = np.array([labels[label] for label in labels])
+
+        precision_ours, recall_ours, _ = precision_recall_curve(targs, probs_ours)
+        precision_test, recall_test, _ = precision_recall_curve(targs, probs_test)
+
+        axes[i].plot(recall_ours, precision_ours, label='Ours', color='orange', linewidth=4)
+        axes[i].plot(recall_test, precision_test, label=name  , color='purple', linewidth=4)
+        axes[i].fill_between(recall_ours, precision_ours, alpha=0.3, color='orange')
+        axes[i].fill_between(recall_test, precision_test, alpha=0.3, color='purple')
+
+        if i == 0:
+            axes[i].set_ylabel('Precision')
+            axes[i].set_yticks([0, 1])
+        else:
+            axes[i].set_yticks([])
+        axes[i].set_xlabel('Recall')
+        axes[i].set_xticks([0, 1])
+
+        axes[i].tick_params(axis='both')
+        axes[i].set_xlim(0, 1)
+        axes[i].set_ylim(0, 1)
+        axes[i].spines['right'].set_visible(False)
+        axes[i].spines['top']  .set_visible(False)
+        axes[i].set_facecolor('aliceblue')
+        axes[i].set_title(f'{scene}')
+
+    axes[0].legend(loc='lower left', framealpha=1)
+
+    if filename is None:
+        plt.show()
+    fig.savefig(filename, bbox_inches='tight')
+    plt.clf()
 
 
 if __name__ == '__main__':
-    import os
-    experiment = 'experiments/existence'
-    os.makedirs(experiment, exist_ok=True)
-    for scene in ['bouquet', 'figurines', 'teatime', 'waldo_kitchen']: # LERF Dataset does not release table scene
-        path = Path(f'{experiment}/{scene}.json')
-        if path.exists():
-           continue
-        scores_ours, relevancy_maps_ours,\
-        scores_lerf, relevancy_maps_lerf, iou_t = evaluate_scene(scene, experiment)
-        with open(path, 'w') as f:
-            json.dump({
-                'ours': scores_ours, 
-                'lerf': scores_lerf}, f, indent=4
-            )
-        with open(f'{experiment}/{scene}_iou.json', 'w') as f:
-            json.dump(iou_t, f, indent=4)
+    for RendererT, FrameSequenceReaderT in RENDERERS:
+        accum_scores = {}
+        accum_labels = {}
+        for scene in DATASETS:
+            if scene == 'ramen': # TODO: fix by training langsplat on all scenes
+                continue
+            scores, labels = evaluate_scene(scene, RendererT, FrameSequenceReaderT)
+            accum_scores[scene] = scores
+            accum_labels[scene] = labels
+        renderer_name = RendererT.__name__
+        plot_precision_recall_curve(
+            accum_scores, 
+            accum_labels, 
+            renderer_name.strip('Renderer'), SAVE_DIR / f'{renderer_name}.png'
+        )
