@@ -3,8 +3,8 @@
 dataset_path=$1
 dataset_name=$2
 
-# get the language feature of the scene (included in OpenGaussian lerf_ovs dataset)
-#python preprocess.py --dataset_name $dataset_path
+# get the language feature of the scene (included in OpenGaussian lerf_ovs dataset for certain scenes)
+python preprocess.py --dataset_path $dataset_path
 
 # ATTENTION: Before you train the LangSplat, please follow https://github.com/graphdeco-inria/gaussian-splatting
 # to train the RGB 3D Gaussian Splatting model.
