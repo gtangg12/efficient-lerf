@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 
 from efficient_lerf.data.common import TorchTensor
 from efficient_lerf.data.sequence import FrameSequence
+from efficient_lerf.models.model_netvlad import ModelNetVLAD
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.utils.visualization import *
 from efficient_lerf.quantization_methods import *
@@ -29,10 +30,15 @@ class FeatureMapQuantization:
         """
         """
         self.config = config
+        if self.config.k_adaptive:
+            self.model_netvlad = ModelNetVLAD()
 
     def process_sequence(self, sequence: FrameSequence, renderer: Renderer) -> FrameSequence:
         """
         """
+        self.config.sequence_path = sequence.metadata['data_dir'] / 'sequence' / 'sequence.pt'
+        self.config.visualize_dir = sequence.metadata['data_dir'] / 'sequence' / 'visualizations'
+
         start_time = time.time()
 
         sequence_downsampled = sequence.clone()
@@ -73,14 +79,18 @@ class FeatureMapQuantization:
         sequence = sequence.clone()
         sequence.transform_cameras(*renderer.get_camera_transform())
         index = index if index is not None else 0
+        
+        if self.config.k_adaptive:
+            visual_embeds = self.model_netvlad(sequence)
+            visual_compactness = torch.mean(visual_embeds @ visual_embeds.T)
 
         accum_embed_means = defaultdict(list)
         accum_assignments = defaultdict(list)
         accum_count = Counter()
         pca = pca if pca is not None else defaultdict(dict)
-        if self.config.visualize_dir is not None:
+        if self.config.visualize is not None:
             os.makedirs(self.config.visualize_dir, exist_ok=True)
-        
+
         def quantize_local(
             iter: int,
             name: str,
@@ -102,25 +112,29 @@ class FeatureMapQuantization:
             accum_count[name] += len(torch.unique(assignment))
             quant = embed_mean[assignment]
 
-            if self.config.visualize_dir and iter % self.config.visualize_stride == 0:
+            if self.config.visualize and iter % self.config.visualize_stride == 0:
                 _pca = compute_pca(embed.numpy(), use_torch=True)
                 visualize_features(embed.numpy(), _pca).save(f'{self.config.visualize_dir}/{name}_{iter:003}.png')
                 visualize_features(quant.numpy(), _pca).save(f'{self.config.visualize_dir}/{name}_{iter:003}_quant_local.png')
                 pca[iter][name] = _pca
             return quant
 
-        def quantize_global(names: list[str], ratio: float) -> tuple:
+        def quantize_global(names: list[str]) -> tuple:
             """
             Returns codebook: (k, d), codebook_indices: (N, len(names), H, W)
-            """
+            """            
             codebook_vectors = []
             codebook_indices = []
             count = 0
             for i, name in tqdm(enumerate(names)):
+                k = int(self.config.k_ratio * accum_count[name])
+                if self.config.k_adaptive:
+                    r = 1 / len(sequence)
+                    k = r * k + (1 - r) * (1 - visual_compactness) * k # linear interpolation between min clusters and fixed ratio
                 _codebook_vectors, _codebook_indices = setup_codebook(
                     accum_embed_means[name],
                     accum_assignments[name],
-                    k=int(ratio * accum_count[name]) # each scale based on the same superpixels
+                    k=k # each scale based on the same superpixels
                 )
                 codebook_vectors.append(_codebook_vectors)
                 codebook_indices.append(_codebook_indices + count)
@@ -133,7 +147,7 @@ class FeatureMapQuantization:
 
             for i in range(len(sequence)):
                 iter = i + index
-                if not (self.config.visualize_dir and iter % self.config.visualize_stride == 0):
+                if not (self.config.visualize and iter % self.config.visualize_stride == 0):
                     continue
                 for j, name in enumerate(names):
                     quant = codebook_vectors[codebook_indices[i, j]]
@@ -142,27 +156,34 @@ class FeatureMapQuantization:
         
         print('Running per frame local quantization')
 
-        for i, camera in tqdm(enumerate(sequence.cameras)):
-            iter = i + index
+        local_quantization_path = self.config.sequence_path.parent / 'local_quantization.pt'
+        if local_quantization_path.exists():
+            accum_embed_means, accum_assignments, accum_count, pca = torch.load(local_quantization_path)
+        else:
+            for i, camera in tqdm(enumerate(sequence.cameras)):
+                iter = i + index
 
-            image = sequence.images[i]
-            if self.config.visualize_dir and iter % self.config.visualize_stride == 0:
-                visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{iter:003}.png')
+                image = sequence.images[i]
+                if self.config.visualize and iter % self.config.visualize_stride == 0:
+                    visualize_image(image.numpy()).save(f'{self.config.visualize_dir}/image_{iter:003}.png')
 
-            for name in renderer.feature_names():
-                for j, embed in enumerate(renderer.render(name, camera)):
-                    quantize_local(iter, name + f'_{j}', image, embed)
-        
-        for k, v in accum_embed_means.items():
-            # Concat codebooks: (k_i, d) -> (k, d)
-            accum_embed_means[k] = torch.cat(v, dim=0)
-            # Stack assignments: (H, W) -> (N, H, W)
-            accum_assignments[k] = torch.stack(accum_assignments[k])
+                for name in renderer.feature_names():
+                    for j, embed in enumerate(renderer.render(name, camera)):
+                        quantize_local(iter, name + f'_{j}', image, embed)
+            
+            for k, v in accum_embed_means.items():
+                # Concat codebooks: (k_i, d) -> (k, d)
+                accum_embed_means[k] = torch.cat(v, dim=0)
+                # Stack assignments: (H, W) -> (N, H, W)
+                accum_assignments[k] = torch.stack(accum_assignments[k])
+
+            if self.config.cache_local_quantization_outputs:
+                torch.save((accum_embed_means, accum_assignments, accum_count, pca), local_quantization_path)
 
         print('Running global quantization')
 
         for name, nscales in renderer.feature_names().items():
-            codebook_vectors, codebook_indices = quantize_global([name + f'_{j}' for j in range(nscales)], self.config.k_ratio)
+            codebook_vectors, codebook_indices = quantize_global([name + f'_{j}' for j in range(nscales)])
             sequence.codebook_vectors[f'{name}'] = codebook_vectors
             sequence.codebook_indices[f'{name}'] = codebook_indices
         
@@ -176,19 +197,23 @@ if __name__ == '__main__':
     from efficient_lerf.renderer.renderer_lerf import LERFRenderer
 
     tests = Path('tests') / 'sequence'
+    os.makedirs(tests, exist_ok=True)
 
     reader = LERFFrameSequenceReader('bouquet')
     sequence = reader.read(slice=(0, 4, 1))
+    sequence.metadata['data_dir'] = tests.parent
     renderer = LERFRenderer('bouquet')
 
     feature_map_quant = FeatureMapQuantization(OmegaConf.create({
         'batch': 2,
         'downsample': 4,
         'k_ratio': 0.05,
+        'k_adaptive': False,
         'superpixels_ncomponents': 2048,
-        'superpixels_compactness': 0,
-        'visualize_dir': tests / 'visualizations',
-        'visualize_stride': 10
+        'superpixels_compactness': 5,
+        'visualize': True,
+        'visualize_stride': 10,
+        'cache_local_quantization_outputs': True
     }))
     sequence = feature_map_quant.process_sequence(sequence, renderer)
     print(len(sequence))

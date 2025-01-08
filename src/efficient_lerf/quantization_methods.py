@@ -75,10 +75,11 @@ def quantize_image_superpixel(image: TorchTensor['H', 'W', 3], embed: TorchTenso
         embed_mean_naive[i] = flat_embeddings[flat_assignment == i].mean(0)
     assert torch.allclose(embed_mean, embed_mean_naive)
     '''
+    embed_mean = norm(embed_mean, dim=-1)
     return embed_mean, assignment
 
 
-def quantize_image_patch(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], patch_size=16) -> tuple:
+def quantize_image_patch(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], patch_size=4) -> tuple:
     """
     Returns: embed_mean: (k, d), assignemnts: (h, w). Requires image for consistent interface.
     """
@@ -96,6 +97,7 @@ def quantize_image_patch(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H'
     embed = embed.view(patches_h, patch_size, patches_w, patch_size, D)
     
     embed_mean = embed.mean(dim=(1, 3)).view(-1, D)
+    embed_mean = norm(embed_mean, dim=-1)
 
     rindices = torch.arange(H, device=embed.device).unsqueeze(1).expand(-1, W)
     cindices = torch.arange(W, device=embed.device).unsqueeze(0).expand(H, -1)
@@ -107,15 +109,26 @@ def quantize_image_patch(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H'
 
 
 if __name__ == '__main__':
-    image = torch.load('/home/gtangg12/efficient-lerf/tests/lerf/tensors/rgb.pt')
-    embed = torch.load('/home/gtangg12/efficient-lerf/tests/lerf/tensors/clip.pt')
-    image = (image * 255).int()
-
+    import os
+    from pathlib import Path
+    from efficient_lerf.utils.math import *
     from efficient_lerf.utils.visualization import *
 
-    embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents=2048, compactness=0)
+    path = Path('/home/gtangg12/efficient-lerf/tests/quant_methods')
+    os.makedirs(path, exist_ok=True)
+
+    image = torch.load(path.parent / 'lerf/tensors/rgb.pt')
+    embed = torch.load(path.parent / 'lerf/tensors/clip.pt')
+    embed = norm(embed, dim=-1)
+    image = (image * 255).int()
+    pca = compute_pca(embed, use_torch=True)
+    visualize_features(embed.numpy(), pca=pca).save(path / 'embed.png')
+
+    embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents=2048, compactness=5)
+    quant = embed_mean[assignment]
+    visualize_features(quant.numpy(), pca=pca).save(path / 'quant_superpixel.png')
     print(embed_mean.shape, assignment.shape)
-    print('Reconstruction error:', torch.mean(torch.sum(embed * embed_mean[assignment], dim=-1)).item())
+    print('Reconstruction error:', torch.mean(torch.sum(embed * quant, dim=-1)).item())
 
     codebook, codebook_indices = quantize_embed_kmeans(embed_mean, k=64)
     print(codebook.shape, codebook_indices.shape)
@@ -126,5 +139,7 @@ if __name__ == '__main__':
     # assert len(codebook_indices.unique()) == len(codebook)
 
     embed_mean, assignment = quantize_image_patch(image, embed, patch_size=4)
+    quant = embed_mean[assignment]
     print(embed_mean.shape, assignment.shape)
-    print('Reconstruction error:', torch.mean(torch.sum(embed * embed_mean[assignment], dim=-1)).item())
+    print('Reconstruction error:', torch.mean(torch.sum(embed * quant, dim=-1)).item())
+    visualize_features(quant.numpy(), pca=pca).save(path / 'quant_patch.png')

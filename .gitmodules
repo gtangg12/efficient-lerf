@@ -7,3 +7,6 @@
 [submodule "third_party/gaussian-splatting"]
 	path = third_party/gaussian-splatting
 	url = https://github.com/graphdeco-inria/gaussian-splatting.git
+[submodule "third_party/Hierarchical-Localization"]
+	path = third_party/Hierarchical-Localization
+	url = https://github.com/cvg/Hierarchical-Localization.git
