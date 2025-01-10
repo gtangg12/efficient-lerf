@@ -11,12 +11,8 @@ from efficient_lerf.renderer.renderer_langsplat import LangSplatRenderer
 from efficient_lerf.utils.math import mean
 
 
-RENDERERS          = [(LERFRenderer, LERFFrameSequenceReader), (LangSplatRenderer, LangSplatFrameSequenceReader)]
-RENDERERS_EXPANDED = [(LERFRenderer, LERFFrameSequenceReader)]
-
-
-DATASETS          = ['figurines', 'ramen', 'teatime', 'waldo_kitchen']
-DATASETS_EXPANDED = natsorted([Path(x).stem for x in glob(str(DATASET_DIR / 'lerf/LERF Datasets/*'))])
+RENDERERS = [(LERFRenderer, LERFFrameSequenceReader), (LangSplatRenderer, LangSplatFrameSequenceReader)]
+DATASETS  = natsorted([Path(x).stem for x in glob(str(DATASET_DIR / 'lerf/LERF Datasets/*'))])
 
 
 def convert_dict_tuple2nested(d):
