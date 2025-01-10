@@ -16,13 +16,6 @@ from efficient_lerf.utils.visualization import *
 from efficient_lerf.quantization_methods import *
 
 
-def name_clip(j):
-    return f'clip_{j}'
-
-def name_dino():
-    return 'dino'
-
-
 class FeatureMapQuantization:
     """
     """

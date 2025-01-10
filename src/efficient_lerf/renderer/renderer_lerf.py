@@ -3,6 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from natsort import natsorted
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.pipelines.base_pipeline import VanillaPipeline
@@ -75,13 +76,17 @@ class LERFRenderer(Renderer):
         try:
             self.enable_model_cache()
             for scale in self.scales:
-                yield self.render_helper(camera, setting=float(scale))['clip']
+                features = self.render_helper(camera, setting=float(scale))['clip']
+                features = F.normalize(features, dim=-1)
+                yield features
         finally:
             self.disable_model_cache()
 
     def render_dino(self, camera: Cameras):
-        yield self.render_helper(camera, setting='no_relevancy')['dino']
-    
+        features = self.render_helper(camera, setting='no_relevancy')['dino']
+        features = F.normalize(features, dim=-1)
+        yield features
+
     def render_lerf(self, camera: Cameras):
         return self.render_helper(camera, setting='no_relevancy')
 
@@ -139,7 +144,7 @@ if __name__ == '__main__':
     cameras = cameras[0]
     print(cameras.height, cameras.width)
 
-    os.makedirs(f'{tests}/lerf/tensors', exist_ok=True)
+    os.makedirs(f'{tests}/tensors', exist_ok=True)
     outputs = renderer.render_lerf(cameras)
     for k, v in outputs.items():
         print(k, v.shape)
@@ -147,6 +152,8 @@ if __name__ == '__main__':
     
     clip = renderer.render_helper(cameras, setting=1.0)['clip'] # identical to outputs['clip'] which has same scale=1
     dino = outputs['dino']
+    clip = F.normalize(clip, dim=-1)
+    dino = F.normalize(dino, dim=-1)
 
     positives = ['flower', 'bouquet', 'rose']
     probs = renderer.find_clip(positives, clip)

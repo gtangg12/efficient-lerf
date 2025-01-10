@@ -111,22 +111,33 @@ def quantize_image_patch(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H'
 if __name__ == '__main__':
     import os
     from pathlib import Path
+    from torchvision.transforms import PILToTensor
+    from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
     from efficient_lerf.utils.math import *
     from efficient_lerf.utils.visualization import *
 
     path = Path('/home/gtangg12/efficient-lerf/tests/quant_methods')
     os.makedirs(path, exist_ok=True)
 
+    lpips = LearnedPerceptualImagePatchSimilarity()
+
+    def to_torch(image: Image.Image):
+        return PILToTensor()(image).unsqueeze(0) / 255 * 2 - 1
+
     image = torch.load(path.parent / 'lerf/tensors/rgb.pt')
     embed = torch.load(path.parent / 'lerf/tensors/clip.pt')
     embed = norm(embed, dim=-1)
     image = (image * 255).int()
     pca = compute_pca(embed, use_torch=True)
-    visualize_features(embed.numpy(), pca=pca).save(path / 'embed.png')
+    embed_image = visualize_features(embed.numpy(), pca=pca)
+    embed_image.save(path / 'embed.png')
+    print(lpips(to_torch(embed_image), to_torch(embed_image))) # lower lpips better
 
     embed_mean, assignment = quantize_image_superpixel(image, embed, ncomponents=2048, compactness=5)
     quant = embed_mean[assignment]
-    visualize_features(quant.numpy(), pca=pca).save(path / 'quant_superpixel.png')
+    quant_image = visualize_features(quant.numpy(), pca=pca)
+    quant_image.save(path / 'quant_superpixel.png')
+    print(lpips(to_torch(embed_image), to_torch(quant_image)))
     print(embed_mean.shape, assignment.shape)
     print('Reconstruction error:', torch.mean(torch.sum(embed * quant, dim=-1)).item())
 
@@ -140,6 +151,8 @@ if __name__ == '__main__':
 
     embed_mean, assignment = quantize_image_patch(image, embed, patch_size=4)
     quant = embed_mean[assignment]
+    quant_image = visualize_features(quant.numpy(), pca=pca)
+    quant_image.save(path / 'quant_patch.png')
+    print(lpips(to_torch(embed_image), to_torch(quant_image)))
     print(embed_mean.shape, assignment.shape)
     print('Reconstruction error:', torch.mean(torch.sum(embed * quant, dim=-1)).item())
-    visualize_features(quant.numpy(), pca=pca).save(path / 'quant_patch.png')

@@ -3,6 +3,7 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 import torchvision
 
 from efficient_lerf.data.common import TorchTensor, DATASET_DIR
@@ -94,6 +95,7 @@ class LangSplatRenderer(Renderer):
             features_latent = features_latent.reshape(H * W, -1)
             features_decode = self.decode_fn(features_latent)
             features_decode = features_decode.reshape(H, W, -1)
+            features_decode = F.normalize(features_decode, dim=-1)
             yield features_decode
 
     def find_clip(self, positives: list[str], features: TorchTensor[..., 'dim']) -> TorchTensor['N', '...']:
