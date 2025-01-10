@@ -56,7 +56,7 @@ def quantize_image_superpixel(image: TorchTensor['H', 'W', 3], embed: TorchTenso
     """
     Returns: embed_mean: (k, d), assignments: (h, w)
     """
-    assignment = compute_superpixels(image, ncomponents, compactness)
+    assignment = compute_superpixels(image, ncomponents, compactness).to(embed.device)
 
     # Compute mean of embeddings for each superpixel
     dim = embed.shape[-1]
