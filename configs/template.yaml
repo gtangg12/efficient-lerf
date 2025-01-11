@@ -2,8 +2,11 @@ feature_map_quant:
   batch: 16
   downsample: 4
   k_ratio: 0.05
-  superpixels_ncomponents: 512
-  superpixels_compactness: 0
+  k_adaptive: false
+  superpixels_ncomponents: 1024
+  superpixels_compactness: 5
+  visualize: true
   visualize_stride: 10
+  cache_local_quantization_outputs: false
 
 slice: [0, null, 1]

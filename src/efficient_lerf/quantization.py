@@ -149,7 +149,7 @@ class FeatureMapQuantization:
         
         print('Running per frame local quantization')
 
-        local_quantization_path = self.config.sequence_path.parent / 'local_quantization.pt'
+        local_quantization_path = self.config.sequence_path.parent / f'local_quantization_{index}.pt'
         if local_quantization_path.exists():
             accum_embed_means, accum_assignments, accum_count, pca = torch.load(local_quantization_path)
         else:
