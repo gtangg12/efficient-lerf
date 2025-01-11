@@ -5,40 +5,55 @@ from pathlib import Path
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LinearLocator, NullLocator, FormatStrFormatter
+from torchvision.transforms import PILToTensor, Compose
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from tqdm import tqdm
 
 from efficient_lerf.data.common import TorchTensor
 from efficient_lerf.data.sequence import FrameSequence, load_sequence
 from efficient_lerf.renderer.renderer import Renderer
 from efficient_lerf.quantization_methods import quantize_image_patch, quantize_image_superpixel
-from efficient_lerf.utils.math import mean, norm
+from efficient_lerf.utils.math import compute_pca, mean, norm
+from efficient_lerf.utils.visualization import *
 
-from experiments.common import DATASETS, RENDERERS, setup
-
-
-SAVE_DIR = Path('experiments/feature_maps_local')
+from experiments.common import DATASETS, DATASETS_SUBSET, RENDERERS, setup
 
 
-def key(scale: int, method: str, params: dict) -> str:
-    return f'{scale}@{method}@{str(params)}'
+SAVE_DIR = Path('experiments/outputs/feature_maps_local')
 
 
-def distance(image: TorchTensor['H', 'W', 3], embed: TorchTensor['H', 'W', 'dim'], method: callable) -> tuple:
+lpips_evaluator = LearnedPerceptualImagePatchSimilarity()
+lpips_transform = Compose([
+    PILToTensor(),
+    lambda x: x.unsqueeze(0) / 255 * 2 - 1
+])
+
+def lpips(sample: Image.Image, target: Image.Image):
+    return lpips_evaluator(
+        lpips_transform(sample),
+        lpips_transform(target),
+    )
+
+
+def key(method: str, scale: int, params: dict) -> str:
+    return f'{method}@{scale}@{str(params)}'
+
+
+def distance(
+    image: TorchTensor['H', 'W', 3], 
+    embed: TorchTensor['H', 'W', 'dim'],
+    embed_visual: Image.Image, 
+    pca: TorchTensor['K', 'dim'], 
+    method: callable
+) -> tuple:
     """
     """
-    embed = norm(embed.detach().cpu(), dim=-1)
     embed_mean, assignment = method(image, embed)
     quant = embed_mean[assignment]
-    quant_loss = torch.mean(torch.sum(embed * quant, dim=-1)).item()
-    return quant_loss, len(embed_mean)
-
-
-def distance_baseline(embed: TorchTensor['H', 'W', 'dim']) -> float:
-    """
-    """
-    quant_baseline = embed.reshape(-1, embed.shape[-1]).mean(0)
-    quant_baseline_loss = torch.mean(torch.sum(embed * quant_baseline, dim=-1)).item()
-    return quant_baseline_loss
+    quant_visual = visualize_features(quant.cpu().numpy(), pca=pca)
+    loss_cosine = torch.mean(torch.sum(embed * quant, dim=-1)).item()
+    loss_lpips = lpips(quant_visual, embed_visual).item()
+    return loss_cosine, loss_lpips, len(embed_mean)
 
 
 def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer, methods: dict, rescale=0.25) -> dict:
@@ -47,47 +62,48 @@ def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer, met
     sequence = sequence.clone()
     sequence.transform_cameras(*renderer.get_camera_transform())
     sequence.rescale_camera_resolution(rescale) # match renderer resolution
-    
+
     stats = defaultdict(list)
-    stats_baseline = []
 
     for i, (camera, image) in tqdm(enumerate(zip(sequence.cameras, sequence.images))):
         for j, embed in enumerate(renderer.render(name, camera)):
+            embed_np = embed.cpu().numpy()
+            pca = compute_pca(embed_np, use_torch=True)
+            embed_visual = visualize_features(embed_np, pca=pca)
+
             for method in methods.keys():
                 method_fn = globals()[f'quantize_image_{method}']
                 for params in methods[method]['params']:
-                    stats[key(j, method, params)].append(
-                        distance(image, embed, lambda args: method_fn(*args, **params))
-                    )
-                    stats_baseline.append(
-                        distance_baseline(embed)
+                    stats[key(method, j, params)].append(
+                        distance(image, embed, embed_visual, pca, lambda x, y: method_fn(x, y, **params))
                     )
     
     scale_mean = defaultdict(list)
     for k, v in stats.items():
-        _, method, params = tuple(k.split('@'))
+        method, _, params = tuple(k.split('@'))
         scale_mean[key('scale_mean', method, params)].extend(v)
 
-    stats_combined = {}
+    stats = {}
     for k, v in scale_mean.items():
-        losses, length = zip(*v)
-        stats_combined[k] = (mean(losses), mean(length))
-        #print(f'{k}: {stats_combined[k]}')
-    stats_combined['baseline'] = mean(stats_baseline)
-    return stats_combined
+        losses_cosine, losses_lpips, length = zip(*v)
+        stats[k] = (mean(losses_cosine), mean(losses_lpips), mean(length))
+        #print(f'{k}: {stats}')
+    return stats
 
 
-def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, stride=20) -> dict:
+def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, num_samples=20) -> dict:
     """
     """
     stats, path, renderer_name = setup(SAVE_DIR, scene, RendererT)
     if stats is not None:
         return stats
-    print(f'Evaluating feature maps for renderer {renderer_name} for scene {scene}')
 
     reader, renderer = FrameSequenceReaderT(scene), RendererT(scene)
-    sequence = load_sequence(reader.data_dir / 'sequence/sequence.pt')[::stride]
+    sequence = reader.read()
+    sequence = sequence[::len(sequence) // num_samples]
     
+    print(f'Evaluating feature maps for renderer {renderer_name} for scene {scene} on {len(sequence)} frames')
+
     stats = {}
     for feature_name in renderer.feature_names():
         stats[feature_name] = evaluate_feature(feature_name, sequence, renderer, methods={
@@ -121,56 +137,58 @@ def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, stride=20)
     return stats
 
 
-def plot_comparison_curve(accum: dict, filename: Path | str) -> None:
+def plot_comparison_curve(accum: dict, filename: Path | str, group: int) -> None:
     """
     """
-    nplots = len(accum)
+    nplot = len(accum)
+    nrows = group
+    ncols = nplot // group
     feature_names = set(accum[list(accum.keys())[0]].keys())
 
-    baselines = {}
-    for feature_name in feature_names:
-        baselines[feature_name] = []
-        for (scene, RendererT), stats in accum.items():
-            baselines[feature_name].append(stats[feature_name].pop('baseline'))
-    
-    colors = {'patch': 'purple', 'superpixel': 'orange'}
+    method2color = {'patch': 'purple', 'superpixel': 'orange'}
+    metric2plots = {'cosine': None, 'lpips': None}
 
     for feature_name in feature_names:
-        fig, axes = plt.subplots(1, nplots, figsize=(7.5 * nplots, 5), constrained_layout=True) # 1.5 aspect ratio
-        if nplots == 1:
-            axes = [axes] # Ensure axes iterable
+        for metric in metric2plots.keys():
+            fig, axes = plt.subplots(nrows, ncols, figsize=(7.5 * ncols, 5 * nrows), constrained_layout=True) # 1.5 aspect ratio
+            if nrows == 1:
+                axes = np.array([axes]) # Ensure axes iterable
+            metric2plots[metric] = (fig, axes)
 
         for i, ((scene, RendererT), stats) in enumerate(accum.items()):
-            x = defaultdict(list)
-            y = defaultdict(list)
-            baseline = baselines[feature_name][i]
+            x = defaultdict(lambda: defaultdict(list))
+            y = defaultdict(lambda: defaultdict(list))
             for k, v in stats[feature_name].items():
-                _, method, _ = tuple(k.split('@'))
-                x[method].append(v[1])
-                y[method].append(v[0])
-            for method in x.keys():
-                axes[i].plot(x[method], y[method], label=method, color=colors[method], linewidth=4)
-            axes[i].plot(
-                [0, max(x['patch'])],
-                [baseline, baseline],
-                label='feature map mean', color=(1.00, 0.30, 0.30), linewidth=4, linestyle='--'
-            )
+                _, method, params = tuple(k.split('@'))
+                x['cosine'][method].append(v[2])
+                y['cosine'][method].append(v[0])
+                x['lpips' ][method].append(v[2])
+                y['lpips' ][method].append(v[1])
 
-            axes[i].set_title(scene)
-            axes[i].set_facecolor('aliceblue')
-            axes[i].set_xscale('log')
-            axes[i].set_xlabel('Codebook Size')
-            if i == 0:
-                axes[i].set_ylabel('Quantization Similarity')
-            axes[i].set_ylim(None, 1)
-            axes[i].xaxis.set_minor_locator(NullLocator())
-            axes[i].yaxis.set_major_locator(LinearLocator(5))
-            axes[i].yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+            r = i // ncols
+            c = i  % ncols
+            for metric, (fig, axes) in metric2plots.items():
+                for method in x[metric].keys():
+                    axes[r, c].plot(
+                        x[metric][method], 
+                        y[metric][method], 
+                        label=method, color=method2color[method], linewidth=4
+                    )
+                axes[r, c].set_title(scene)
+                axes[r, c].set_facecolor('aliceblue')
+                axes[r, c].set_xscale('log')
+                axes[r, c].set_xlabel('Codebook Size')
+                if i == 0:
+                    axes[r, c].set_ylabel('Quantization Similarity')
+                axes[r, c].set_ylim(None, 1)
+                axes[r, c].xaxis.set_minor_locator(NullLocator())
+                axes[r, c].yaxis.set_major_locator(LinearLocator(5))
+                axes[r, c].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
 
-        axes[-1].legend(loc='lower right', framealpha=1)
+        for metric, (fig, axes) in metric2plots.items():
+            axes[-1, -1].legend(loc='lower right', framealpha=1)
 
-        fig.savefig(f'{filename}/{feature_name}.png')
-        plt.clf()
+            fig.savefig(f'{filename}/{feature_name}{group}_{metric}.png')
 
 
 if __name__ == '__main__':
@@ -179,4 +197,12 @@ if __name__ == '__main__':
         for scene in DATASETS:
             stats = evaluate(scene, RendererT, FrameSequenceReaderT)
             accum[(scene, RendererT)] = stats
-        plot_comparison_curve(accum, SAVE_DIR / f'{RendererT.__name__}')
+        accum1 = {}
+        accum2 = {}
+        for k, v in accum.items():
+            if k[0] in DATASETS_SUBSET:
+                accum1[k] = v
+            else:
+                accum2[k] = v
+        plot_comparison_curve(accum1, SAVE_DIR / f'{RendererT.__name__}', group=1)
+        plot_comparison_curve(accum2, SAVE_DIR / f'{RendererT.__name__}', group=2)

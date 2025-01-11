@@ -2,7 +2,7 @@ feature_map_quant:
   batch: 16
   downsample: 4
   k_ratio: 0.05
-  superpixels_ncomponents: 2048
+  superpixels_ncomponents: 512
   superpixels_compactness: 0
   visualize_stride: 10
 
