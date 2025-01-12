@@ -13,7 +13,7 @@ from PIL import Image
 from nerfstudio.cameras.cameras import Cameras
 
 from efficient_lerf.data.common import TorchTensor
-from efficient_lerf.utils.math import pad_poses, upsample_feature_map
+from efficient_lerf.utils.math import norm, pad_poses, upsample_feature_map
 
 import sys
 sys.path.append('third_party/LangSplat')
@@ -144,6 +144,7 @@ class FrameSequence:
             H = self.images[0].shape[0]
             W = self.images[0].shape[1]
             features = upsample_feature_map(features, H, W)
+        features = norm(features, dim=-1)
         return features
 
 

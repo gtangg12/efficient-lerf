@@ -9,6 +9,8 @@ import torchvision
 from efficient_lerf.data.common import TorchTensor, DATASET_DIR
 from efficient_lerf.renderer.renderer import Renderer
 
+from lerf.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
+
 import sys
 sys.path.append('third_party/LangSplat')
 from autoencoder.model import Autoencoder
@@ -62,6 +64,12 @@ def load_pipeline_autoencoder(checkpoint: Path | str, device='cuda') -> callable
     return decode_fn
 
 
+def load_image_encoder() -> OpenCLIPNetwork:
+    """
+    """
+    return OpenCLIPNetworkConfig().setup()
+
+
 class LangSplatRenderer(Renderer):
     """
     LangSplat renderer class that wraps around LangSplat pipeline.
@@ -81,6 +89,7 @@ class LangSplatRenderer(Renderer):
             i: load_pipeline_gaussian(self.checkpoint, i) for i in range(1, NUM_SAM_SCALES + 1)
         }
         self.decode_fn = load_pipeline_autoencoder(self.checkpoint, device)
+        self.image_encoder = load_image_encoder()
 
     def feature_names(self) -> dict:
         return {'clip': NUM_SAM_SCALES}
@@ -99,7 +108,13 @@ class LangSplatRenderer(Renderer):
             yield features_decode
 
     def find_clip(self, positives: list[str], features: TorchTensor[..., 'dim']) -> TorchTensor['N', '...']:
-        pass
+        self.image_encoder.set_positives(positives)
+        probs = []
+        shape, dim = features.shape[:-1], features.shape[-1]
+        features = features.view(-1, dim).to(self.device)
+        for i in range(len(positives)):
+            probs.append(self.image_encoder.get_relevancy(features, positive_id=i)[:, 0].view(*shape)) # positive prob
+        return torch.stack(probs)
 
 
 if __name__ == '__main__':
@@ -116,3 +131,9 @@ if __name__ == '__main__':
         print(features.shape)
         visualize_features(features.cpu().numpy()).save(tests / f'clip_{i}.png')
         #torchvision.utils.save_image(features, tests / f'clip_{i}.png')
+
+    positives = ['jake', 'bunny', 'toy']
+    probs = renderer.find_clip(positives, features)
+
+    for i, positive in enumerate(positives):
+        visualize_relevancy(probs[i].cpu().numpy()).save(f'{tests}/relevancy_{positive}.png')
