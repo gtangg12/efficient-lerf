@@ -7,7 +7,7 @@ from efficient_lerf.data.sequence import FrameSequence, load_sequence
 from experiments.common import RENDERERS, DATASETS, summarize, setup
 
 
-SAVE_DIR = Path('experiments/codebook')
+SAVE_DIR = Path('experiments/outputs/codebook')
 
 
 def bits_per_dim(sequence: FrameSequence) -> dict:

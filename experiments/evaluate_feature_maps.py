@@ -13,7 +13,7 @@ from efficient_lerf.utils.math import norm, mean
 from experiments.common import DATASETS, RENDERERS, summarize, setup
 
 
-SAVE_DIR = Path('experiments/feature_maps')
+SAVE_DIR = Path('experiments/outputs/feature_maps')
 
 
 def distance(embed_targ: TorchTensor['H', 'W', 'dim'], embed_pred: TorchTensor['H', 'W', 'dim']) -> float:
@@ -27,6 +27,7 @@ def distance_baseline(embed_targ: TorchTensor['H', 'W', 'dim']) -> float:
     """
     """
     embed_pred = embed_targ.mean(dim=(0, 1))
+    embed_pred = norm(embed_pred, dim=-1)
     return distance(embed_targ, embed_pred)
 
 
@@ -43,9 +44,8 @@ def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer) -> 
 
     for i, camera in tqdm(enumerate(sequence.cameras)):
         for j, embed in enumerate(renderer.render(name, camera)):
-            embed_pred = sequence.feature_map(name, i, j, upsample=True) # match original resolution
-            embed_pred = norm(embed_pred , dim=-1)
-            embed_targ = norm(embed.cpu(), dim=-1)
+            embed_pred = sequence.feature_map(name, i, j, upsample=True).cpu() # match original resolution
+            embed_targ = embed.cpu()
             stats[j].append(distance(embed_targ, embed_pred))
             stats['baseline'].append(distance_baseline(embed_targ))
     
@@ -54,7 +54,7 @@ def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer) -> 
     return stats
 
 
-def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, stride=20) -> dict:
+def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, num_samples=20) -> dict:
     """
     """
     stats, path, renderer_name = setup(SAVE_DIR, scene, RendererT)
@@ -63,7 +63,8 @@ def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, stride=20)
     print(f'Evaluating feature maps for renderer {renderer_name} for scene {scene}')
     
     reader, renderer = FrameSequenceReaderT(scene), RendererT(scene)
-    sequence = load_sequence(reader.data_dir / 'sequence/sequence.pt')[::stride]
+    sequence = load_sequence(reader.data_dir / 'sequence/sequence.pt')
+    sequence = sequence[::len(sequence) // num_samples]
 
     stats = {}
     for feature_name in renderer.feature_names():
@@ -77,5 +78,10 @@ if __name__ == '__main__':
     accum = {}
     for RendererT, FrameSequenceReaderT in RENDERERS:
         for scene in DATASETS:
-            accum[(scene, RendererT)] = evaluate(scene, RendererT, FrameSequenceReaderT)
+            while True: # handle intermittent memory issues
+                try:
+                    accum[(scene, RendererT)] = evaluate(scene, RendererT, FrameSequenceReaderT)
+                    break
+                except:
+                    continue
     summarize(SAVE_DIR, accum)

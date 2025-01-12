@@ -180,7 +180,7 @@ def plot_comparison_curve(accum: dict, filename: Path | str, group: int) -> None
                 axes[r, c].set_xlabel('Codebook Size')
                 if i == 0:
                     axes[r, c].set_ylabel('Quantization Similarity')
-                axes[r, c].set_ylim(None, 1)
+                axes[r, c].set_ylim(None if metric == 'cosine' else 0, 1)
                 axes[r, c].xaxis.set_minor_locator(NullLocator())
                 axes[r, c].yaxis.set_major_locator(LinearLocator(5))
                 axes[r, c].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))

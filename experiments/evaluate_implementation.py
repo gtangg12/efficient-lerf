@@ -7,7 +7,7 @@ from efficient_lerf.data.sequence import load_sequence, FrameSequence
 from experiments.common import RENDERERS, DATASETS, summarize, setup
 
 
-SAVE_DIR = Path('experiments/implementation')
+SAVE_DIR = Path('experiments/outputs/implementation')
 MEM2UNIT = {'B': 1, 'KB': 1024, 'MB': 1024 ** 2, 'GB': 1024 ** 3}
 
 

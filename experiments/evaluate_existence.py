@@ -15,10 +15,10 @@ from efficient_lerf.utils.math import compute_relevancy
 from efficient_lerf.utils.visualization import *
 from efficient_lerf.feature_field import VQFeatureField, load_model
 
-from experiments.common import DATASETS, RENDERERS, setup
+from experiments.common import DATASETS_SUBSET, RENDERERS, setup
 
 
-SAVE_DIR = Path('experiments/existence')
+SAVE_DIR = Path('experiments/outputs/existence')
 
 
 def load_labels(data_dir: Path | str) -> dict:
@@ -160,9 +160,7 @@ if __name__ == '__main__':
     for RendererT, FrameSequenceReaderT in RENDERERS:
         accum_scores = {}
         accum_labels = {}
-        for scene in DATASETS:
-            if scene == 'ramen': # TODO: fix by training langsplat on all scenes
-                continue
+        for scene in DATASETS_SUBSET:
             scores, labels = evaluate_scene(scene, RendererT, FrameSequenceReaderT)
             accum_scores[scene] = scores
             accum_labels[scene] = labels
