@@ -43,7 +43,7 @@ def distance(
     image: TorchTensor['H', 'W', 3], 
     embed: TorchTensor['H', 'W', 'dim'],
     embed_visual: Image.Image, 
-    pca: TorchTensor['K', 'dim'], 
+    pca: TorchTensor['K', 'dim'],
     method: callable
 ) -> tuple:
     """
@@ -53,10 +53,10 @@ def distance(
     quant_visual = visualize_features(quant.cpu().numpy(), pca=pca)
     loss_cosine = torch.mean(torch.sum(embed * quant, dim=-1)).item()
     loss_lpips = lpips(quant_visual, embed_visual).item()
-    return loss_cosine, loss_lpips, len(embed_mean)
+    return loss_cosine, loss_lpips, len(embed_mean), quant_visual
 
 
-def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer, methods: dict, rescale=0.25) -> dict:
+def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer, methods: dict, path=None, rescale=0.25) -> dict:
     """
     """
     sequence = sequence.clone()
@@ -70,13 +70,19 @@ def evaluate_feature(name: str, sequence: FrameSequence, renderer: Renderer, met
             embed_np = embed.cpu().numpy()
             pca = compute_pca(embed_np, use_torch=True)
             embed_visual = visualize_features(embed_np, pca=pca)
+            if i == 0 and j == 0 and path is not None:
+                embed_visual.save(path / f'embed_{name}_{i}_{j}.png')
 
             for method in methods.keys():
                 method_fn = globals()[f'quantize_image_{method}']
                 for params in methods[method]['params']:
-                    stats[key(method, j, params)].append(
+                    losses_cosine, losses_lpips, n, quant_visual = \
                         distance(image, embed, embed_visual, pca, lambda x, y: method_fn(x, y, **params))
+                    stats[key(method, j, params)].append(
+                        (losses_cosine, losses_lpips, n)
                     )
+                    if i == 0 and j == 0 and path is not None:
+                        quant_visual.save(path / f'embed_{name}_{i}_{j}_{method}_{str(params)}.png')
     
     scale_mean = defaultdict(list)
     for k, v in stats.items():
@@ -96,7 +102,7 @@ def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, num_sample
     """
     stats, path, renderer_name = setup(SAVE_DIR, scene, RendererT)
     if stats is not None:
-        return stats
+       return stats
 
     reader, renderer = FrameSequenceReaderT(scene), RendererT(scene)
     sequence = reader.read()
@@ -131,7 +137,7 @@ def evaluate(scene: str, RendererT: type, FrameSequenceReaderT: type, num_sample
                     {'ncomponents':   64, 'compactness': 0},
                 ]
             }
-        })
+        }, path=path)
     with open(path / 'stats.json', 'w') as f:
         json.dump(stats, f, indent=4)
     return stats

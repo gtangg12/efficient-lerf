@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 from argparse import Namespace
 from dataclasses import asdict, dataclass, field
@@ -182,4 +183,6 @@ def save_sequence_nerfstudio(path: Path | str, sequence: FrameSequence) -> None:
             'file_path': filename,
             'transform_matrix': pad_poses(sequence.cameras[i].camera_to_worlds[i].numpy())
         })
-    return {'camera_model': 'OPENCV', 'frames': frames}
+    transforms = {'camera_model': 'OPENCV', 'frames': frames}
+    with open(path / 'transforms.json', 'w') as f:
+        json.dump(f, transforms)

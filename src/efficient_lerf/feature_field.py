@@ -23,6 +23,7 @@ class VQFeatureField:
         self.device = device
         self.renderer = renderer
         self.sequence = self.quantize(sequence)
+        self.sequence_editor = VQFeatureFieldEditor()
     
     def quantize(self, sequence: FrameSequence) -> FrameSequence:
         """
@@ -60,9 +61,7 @@ class VQFeatureField:
         assert edit_method in ['extract', 'remove', 'edit']
         _, relevancy_maps = self.find(find_name, positive, threshold)
 
-        editor = VQFeatureFieldEditor(self.config.editor)
-
-        getattr(editor, edit_method)(self.sequence.clone(), relevancy_maps, **kwargs)
+        getattr(self.sequence_editor, edit_method)(self.sequence, relevancy_maps, **kwargs)
 
 
 def load_model(scene: str, config: OmegaConf, RendererT: type, FrameSequenceReaderT: type) -> VQFeatureField:
