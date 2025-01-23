@@ -1,10 +1,12 @@
 import cv2
 import numpy as np
+import torch
 from omegaconf import OmegaConf
 
 from efficient_lerf.data.common import TorchTensor
 from efficient_lerf.data.sequence import FrameSequence, save_sequence_nerfstudio
 from efficient_lerf.models.model_instructpix2pix import ModelInstructPix2Pix
+from efficient_lerf.utils.math import resize_feature_map
 
 
 class VQFeatureFieldEditor:
@@ -33,12 +35,18 @@ class VQFeatureFieldEditor:
         save_sequence_nerfstudio(sequence.metadata['data_dir'] / f'sequence/nerfstudio/remove_{name}', sequence)
         return sequence
         
-    def edit(self, name: str, sequence: FrameSequence, masks: TorchTensor['N', 'H', 'W'], prompt: str, dilation=10) -> FrameSequence:
+    def edit(self, name: str, sequence: FrameSequence, masks: TorchTensor['N', 'H', 'W'], prompt: str, save=True) -> FrameSequence:
         """
         """
         sequence, masks = sequence.clone(), masks.clone()
+        _, H, W, _ = sequence.images.shape
+
+        masks_resized = []
         for i, mask in enumerate(masks):
-            masks[i] = cv2.dilate(mask, kernel=np.ones((dilation, dilation)))
-        sequence.images = self.edit_model(prompt, sequence.images, masks)
-        save_sequence_nerfstudio(sequence.metadata['data_dir'] / f'sequence/nerfstudio/edit_{name}', sequence)
+            m = resize_feature_map(mask.unsqueeze(-1), H, W).squeeze(-1)
+            masks_resized.append(m)
+        masks_resized = torch.stack(masks_resized)
+        sequence.images = self.edit_model(prompt, sequence.images, masks_resized)
+        if save:
+            save_sequence_nerfstudio(sequence.metadata['data_dir'] / f'sequence/nerfstudio/edit_{name}', sequence)
         return sequence

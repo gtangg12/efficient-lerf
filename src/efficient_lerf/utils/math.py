@@ -52,7 +52,7 @@ def transpose_list(x: list[list]):
     return list(map(list, zip(*x)))
 
 
-def upsample_feature_map(x: TorchTensor['H', 'W', 'dim'], upH, upW):
+def resize_feature_map(x: TorchTensor['H', 'W', 'dim'], upH, upW):
     """
     """
     x = x.permute(2, 0, 1)

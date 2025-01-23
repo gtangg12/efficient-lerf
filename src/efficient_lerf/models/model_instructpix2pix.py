@@ -28,7 +28,7 @@ class ModelInstructPix2Pix:
         text : str | list[str],
         image: TorchTensor[..., 'H', 'W', 3], 
         mask : TorchTensor[..., 'H', 'W'] = None, 
-        steps = 50, 
+        steps = 50,
         **kwargs
     ) -> TorchTensor['H', 'W', 3]:
         """
@@ -39,17 +39,26 @@ class ModelInstructPix2Pix:
             input = image.unsqueeze(0)
             if mask is not None: 
                 mask = mask.unsqueeze(0)
+        else:
+            input = image
+            if len(text) == 1 and len(image) > 1:
+                text = text * len(image)
         input = [visualize_image(x.numpy()) for x in input]
 
+        # TODO:: implement batching
+        #input, text = input[:1], text[:1]
+
         with torch.no_grad():
-            outputs = self.model(text, image=input, num_inference_steps=steps, **kwargs)
-        edited = [
+            outputs = self.model(text, image=input, num_inference_steps=steps, **kwargs)[0]
+        outputs_resized = [
             torch.from_numpy(np.array(x.resize(input[0].size))) 
-            for x in outputs.images
+            for x in outputs
         ]
+        #visualize_image(outputs_resized[0].cpu().numpy()).save('000_raw.png')
+        edited = []
         if mask is not None:
-            for x, im, m in zip(edited, input, mask):
-                x = mask * x + (1 - mask) * im
+            for x, im, m in zip(outputs_resized, input, mask.unsqueeze(-1)):
+                edited.append(m * x + ~m * torch.tensor(np.array(im)))
         edited = torch.stack(edited)
         if image.ndim == 3:
             edited = edited[0]

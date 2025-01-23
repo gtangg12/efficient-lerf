@@ -54,14 +54,22 @@ class VQFeatureField:
             relevancy_maps.append(compute_relevancy(prob[codebook_indices], threshold).cpu())
         return torch.tensor(scores), torch.stack(relevancy_maps)
 
-    def edit(self, edit_method='extract', find_name='clip', positive=None, threshold=None, **kwargs) -> None:
+    def edit(self, method='extract', find_name='clip', positive=None, threshold=0.5, **kwargs) -> FrameSequence:
         """
         """
-        assert len(positive) == 1, 'Only one positive query per edit is supported'
-        assert edit_method in ['extract', 'remove', 'edit']
-        _, relevancy_maps = self.find(find_name, positive, threshold)
+        assert method in ['extract', 'remove', 'edit']
+        if isinstance(positive, str):
+            positive = [positive]
+        else:
+            raise ValueError(f'{positive} type not supported.')
 
-        getattr(self.sequence_editor, edit_method)(self.sequence, relevancy_maps, **kwargs)
+        _, relevancy_maps = self.find(find_name, positive, threshold)
+        
+        from efficient_lerf.utils.visualization import visualize_relevancy
+        visualize_relevancy(relevancy_maps[0][0].cpu().numpy()).save('000_relevancy.png')
+        
+        name = self.sequence.metadata['data_dir'].name
+        return getattr(self.sequence_editor, method)(name, self.sequence, relevancy_maps[0] > threshold, **kwargs) # unpack first positive
 
 
 def load_model(scene: str, config: OmegaConf, RendererT: type, FrameSequenceReaderT: type) -> VQFeatureField:
