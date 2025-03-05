@@ -14,7 +14,7 @@ from PIL import Image
 from nerfstudio.cameras.cameras import Cameras
 
 from efficient_lerf.data.common import TorchTensor
-from efficient_lerf.utils.math import norm, pad_poses, upsample_feature_map
+from efficient_lerf.utils.math import norm, pad_poses, resize_feature_map
 
 import sys
 sys.path.append('third_party/LangSplat')
@@ -144,7 +144,7 @@ class FrameSequence:
         if upsample:
             H = self.images[0].shape[0]
             W = self.images[0].shape[1]
-            features = upsample_feature_map(features, H, W)
+            features = resize_feature_map(features, H, W)
         features = norm(features, dim=-1)
         return features
 
@@ -174,15 +174,15 @@ def save_sequence_nerfstudio(path: Path | str, sequence: FrameSequence) -> None:
         filename = path / f'images/image_{i}.png'
         Image.fromarray(sequence.images[i].numpy()).save(filename)
         frames.append({
-            'fl_x': sequence.cameras[i].fx,
-            'fl_y': sequence.cameras[i].fy,
-            'cx': sequence.cameras[i].cx,
-            'cy': sequence.cameras[i].cy,
-            'w': sequence.cameras[i].width,
-            'h': sequence.cameras[i].height,
-            'file_path': filename,
-            'transform_matrix': pad_poses(sequence.cameras[i].camera_to_worlds[i].numpy())
+            'fl_x': sequence.cameras[i].fx.item(),
+            'fl_y': sequence.cameras[i].fy.item(),
+            'cx': sequence.cameras[i].cx.item(),
+            'cy': sequence.cameras[i].cy.item(),
+            'w': sequence.cameras[i].width.item(),
+            'h': sequence.cameras[i].height.item(),
+            'file_path': str(filename),
+            'transform_matrix': pad_poses(sequence.cameras.camera_to_worlds[i]).numpy().tolist()
         })
     transforms = {'camera_model': 'OPENCV', 'frames': frames}
     with open(path / 'transforms.json', 'w') as f:
-        json.dump(f, transforms)
+        json.dump(transforms, f)

@@ -64,10 +64,7 @@ class VQFeatureField:
             raise ValueError(f'{positive} type not supported.')
 
         _, relevancy_maps = self.find(find_name, positive, threshold)
-        
-        from efficient_lerf.utils.visualization import visualize_relevancy
-        visualize_relevancy(relevancy_maps[0][0].cpu().numpy()).save('000_relevancy.png')
-        
+
         name = self.sequence.metadata['data_dir'].name
         return getattr(self.sequence_editor, method)(name, self.sequence, relevancy_maps[0] > threshold, **kwargs) # unpack first positive
 

@@ -25,44 +25,35 @@ class ModelInstructPix2Pix:
 
     def __call__(
         self,
-        text : str | list[str],
+        text: str | list[str],
         image: TorchTensor[..., 'H', 'W', 3], 
-        mask : TorchTensor[..., 'H', 'W'] = None, 
         steps = 50,
+        downsample=1,
         **kwargs
-    ) -> TorchTensor['H', 'W', 3]:
+    ) -> TorchTensor[..., 'H', 'W', 3]:
         """
         """
+        H, W, _ = image.shape[-3:]
+
         if isinstance(text, str):
             text = [text]
         if image.ndim == 3:
-            input = image.unsqueeze(0)
-            if mask is not None: 
-                mask = mask.unsqueeze(0)
+            inputs = image.unsqueeze(0)
         else:
-            input = image
+            inputs = image
             if len(text) == 1 and len(image) > 1:
                 text = text * len(image)
-        input = [visualize_image(x.numpy()) for x in input]
-
-        # TODO:: implement batching
-        #input, text = input[:1], text[:1]
-
+        inputs = [
+            visualize_image(x.numpy()).resize((W // downsample, H // downsample)) 
+            for x in inputs
+        ]
         with torch.no_grad():
-            outputs = self.model(text, image=input, num_inference_steps=steps, **kwargs)[0]
+            outputs = self.model(text, image=inputs, num_inference_steps=steps, **kwargs)[0]
         outputs_resized = [
-            torch.from_numpy(np.array(x.resize(input[0].size))) 
+            torch.from_numpy(np.array(x.resize((W, H)))) 
             for x in outputs
         ]
-        #visualize_image(outputs_resized[0].cpu().numpy()).save('000_raw.png')
-        edited = []
-        if mask is not None:
-            for x, im, m in zip(outputs_resized, input, mask.unsqueeze(-1)):
-                edited.append(m * x + ~m * torch.tensor(np.array(im)))
-        edited = torch.stack(edited)
-        if image.ndim == 3:
-            edited = edited[0]
-        return edited
+        return outputs_resized[0] if image.ndim == 3 else outputs_resized
 
 
 if __name__ == '__main__':
@@ -74,8 +65,8 @@ if __name__ == '__main__':
 
     image = Image.open(tests / 'camp.jpg')
     image = image.resize((image.width // 4, image.height // 4))
-    image = torch.from_numpy(np.array(image))
+    image = torch.from_numpy(np.array(image))[None, ...].repeat(8, 1, 1, 1)
     print(image.shape)
     
     output = model('make it snowy', image)
-    visualize_image(output.numpy()).save(tests / 'camp_edited.jpg')
+    visualize_image(output[0].numpy()).save(tests / 'camp_edited.jpg')
