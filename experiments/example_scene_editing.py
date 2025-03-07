@@ -17,7 +17,8 @@ model.edit(
     positive='red apple',
     prompt='turn the apple into a green apple',
     threshold=0.6,
-    save=True
+    save=True,
+    debug=True
 )
 
 model = load_model('bouquet', config, LERFRenderer, LERFFrameSequenceReader) # auto quantize
@@ -26,5 +27,36 @@ model.edit(
     positive='flowers',
     prompt='change the flowers to blue',
     threshold=0.6,
-    save=True
+    save=True,
+    debug=True
+)
+
+model = load_model('donuts', config, LERFRenderer, LERFFrameSequenceReader) # auto quantize
+model.edit(
+    method='edit',
+    positive='donuts',
+    prompt='replace the glazed donuts with chocolate donuts',
+    threshold=0.65,
+    save=True,
+    debug=True
+)
+
+model = load_model('ramen', config, LERFRenderer, LERFFrameSequenceReader) # auto quantize
+model.edit(
+    method='edit',
+    positive='eggs',
+    prompt='make the egg yolk more runny',
+    threshold=0.6,
+    save=True,
+    debug=True
+)
+
+model = load_model('fruit_aisle', config, LERFRenderer, LERFFrameSequenceReader) # auto quantize
+model.edit(
+    method='edit',
+    positive='fruit',
+    prompt='turn into a Monet painting',
+    threshold=0.6,
+    save=True,
+    debug=True
 )

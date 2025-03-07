@@ -39,7 +39,9 @@ class VQFeatureFieldEditor:
         save_sequence_nerfstudio(sequence.metadata['data_dir'] / f'sequence/nerfstudio/remove_{name}', sequence)
         return sequence
         
-    def edit(self, name: str, sequence: FrameSequence, masks: TorchTensor['N', 'H', 'W'], prompt: str, save=True, debug=False) -> FrameSequence:
+    def edit(
+        self, name: str, sequence: FrameSequence, masks: TorchTensor['N', 'H', 'W'], prompt: str, save=True, debug=False, **kwargs
+    ) -> FrameSequence:
         """
         """
         if debug:
@@ -58,7 +60,7 @@ class VQFeatureFieldEditor:
         
         edited_images = []
         for i, (image, mask) in enumerate(tqdm(zip(sequence.images, masks_resized))):
-            edited = self.edit_model(prompt, image, downsample=2)
+            edited = self.edit_model(prompt, image, downsample=2, **kwargs)
             if debug:
                 visualize_image(edited.detach().cpu().numpy()).save(f"tests/editing/{name}/edited_{i:03}.png")
             edited = image * (~mask[..., None]) + edited * mask[..., None]
